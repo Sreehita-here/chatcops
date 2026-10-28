@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createPrettyReporter, type PrettyRunDetails } from '../src/test/reporters/pretty.js';
+import { prettyReporter } from '../src/test/reporters/pretty.js';
 import type { RunSummary } from '../src/test/reporters/index.js';
-import { recordTestDurationMs } from '../src/test/run.js';
 import type { AssertionResult, TestResult, TestRunResult, TurnResult } from '../src/test/types.js';
 
-const summary: RunSummary = { mode: 'live' };
-const details: PrettyRunDetails = { model: 'bot-model-1', elapsedMs: 230, costIncomplete: false };
+const summary: RunSummary = { mode: 'live', model: 'bot-model-1', elapsedMs: 230, costIncomplete: false };
 
 function assertion(pass: boolean, reason: string): AssertionResult {
   return { assertion: { contains: reason }, pass, reason };
@@ -31,16 +29,15 @@ function runResult(run: number, pass: boolean, turns: TestRunResult['turns'], er
 
 function render(
   results: TestResult[],
-  options: { verbose?: boolean; isTTY?: boolean; env?: Record<string, string | undefined>; summary?: RunSummary; details?: PrettyRunDetails } = {},
+  options: { verbose?: boolean; isTTY?: boolean; env?: Record<string, string | undefined>; summary?: RunSummary } = {},
   durations = results.map((_, index) => 100 + index)
 ): string {
   let output = '';
   results.forEach((value, index) => {
-    recordTestDurationMs(value, durations[index]);
+    value.durationMs = durations[index];
   });
   const reportOutput = { write: (text: string) => (output += text), isTTY: options.isTTY };
-  const reporter = createPrettyReporter(reportOutput, { verbose: options.verbose, env: options.env ?? {} });
-  reporter.setRunDetails(options.details ?? details);
+  const reporter = prettyReporter(reportOutput, { verbose: options.verbose, env: options.env ?? {} });
   reporter.onEnd?.(results, options.summary ?? summary);
   return output;
 }
@@ -50,12 +47,11 @@ describe('pretty reporter', () => {
     const first = result('first.yaml', 'first test', [runResult(1, true, [])]);
     const second = result('second.yaml', 'second test', [runResult(1, true, [])]);
     let output = '';
-    recordTestDurationMs(second, 20);
-    recordTestDurationMs(first, 10);
+    second.durationMs = 20;
+    first.durationMs = 10;
     const reportOutput = { write: (text: string) => (output += text) };
-    const reporter = createPrettyReporter(reportOutput, { env: {} });
+    const reporter = prettyReporter(reportOutput, { env: {} });
     expect(output).toBe('');
-    reporter.setRunDetails(details);
     reporter.onEnd?.([first, second], summary);
     expect(output.indexOf('first.yaml')).toBeLessThan(output.indexOf('second.yaml'));
     expect(output).toContain('first test  10 ms');
@@ -104,7 +100,8 @@ describe('pretty reporter', () => {
     const report = render([repeated], { verbose: true });
 
     expect(report).toContain('(2/2 runs)');
-    for (const label of ['Run 1 · Turn 1', 'Run 1 · Turn 2', 'Run 2 · Turn 1', 'Run 2 · Turn 2']) expect(report).toContain(label);
+    for (const label of ['Run 1', 'Run 2']) expect(report).toContain(label);
+    expect(report).not.toContain('Turn ');
     for (const reason of ['first assertion', 'second assertion', 'third assertion', 'fourth assertion']) expect(report).toContain(reason);
   });
 
@@ -116,10 +113,11 @@ describe('pretty reporter', () => {
     const report = render([repeated]);
 
     expect(report).toContain('(1/2 runs)');
-    expect(report).toContain('Run 1 · Turn 1');
+    expect(report).toContain('Run 1');
     expect(report).toContain('✓ turn 1: the first run passed');
-    expect(report).toContain('Run 2 · Turn 1');
+    expect(report).toContain('Run 2');
     expect(report).toContain('✗ turn 1: the second run failed');
+    expect(report).not.toContain('Turn ');
   });
 
   it('groups files in result order and reports test durations separately from total elapsed time', () => {
@@ -128,14 +126,14 @@ describe('pretty reporter', () => {
       result('evals/first.chat.yaml', 'second', [runResult(1, true, [])]),
       result('evals/second.chat.yaml', 'third', [runResult(1, true, [])]),
     ];
-    const report = render(tests, { details: { ...details, elapsedMs: 230 } }, [85, 145, 95]);
+    const report = render(tests, { summary: { ...summary, elapsedMs: 230 } }, [85, 145, 95]);
 
     expect(report.indexOf('evals/first.chat.yaml')).toBeLessThan(report.indexOf('evals/second.chat.yaml'));
     expect(report.match(/evals\/first\.chat\.yaml/g)).toHaveLength(1);
     expect(report).toContain('  ✓ first  85 ms');
     expect(report).toContain('  ✓ second  145 ms');
     expect(report).toContain('Elapsed: 230 ms');
-    expect(render(tests.slice(0, 1), { details: { ...details, elapsedMs: 1240 } }, [1240])).toContain('  ✓ first  1.24 s');
+    expect(render(tests.slice(0, 1), { summary: { ...summary, elapsedMs: 1240 } }, [1240])).toContain('  ✓ first  1.24 s');
   });
 
   it('counts assertions across runs and reports partial bot usage without implying judge tokens', () => {
@@ -153,8 +151,7 @@ describe('pretty reporter', () => {
       runResult(2, false, [{ turn: partialTurn, results: [assertion(false, 'second')] }]),
     ]);
     const report = render([multiRun], {
-      summary: { mode: 'live', judge: 'grader:model', costUsd: 0.01 },
-      details: { ...details, costIncomplete: true },
+      summary: { ...summary, judge: 'grader:model', costUsd: 0.01, costIncomplete: true },
     });
 
     expect(report).toContain('0 passed, 1 failed. Spent about $0.0100 (partial; some calls could not be priced). Judged by grader:model.');
@@ -166,14 +163,14 @@ describe('pretty reporter', () => {
     const failed = result('evals/a.chat.yaml', 'provider error', [runResult(1, false, [], 'provider unavailable')], false);
     const report = render(
       [failed],
-      { summary: { mode: 'replay', costUsd: 1 }, details: { ...details, costIncomplete: true } }
+      { summary: { ...summary, mode: 'replay', costUsd: 1, costIncomplete: true } }
     );
 
     expect(report).toContain('Run 1: provider unavailable');
     expect(report).toContain('Assertions: 0 passed, 0 failed');
     expect(report).toContain('Replayed, nothing spent.');
     expect(report).not.toContain('Spent about');
-    expect(render([failed], { summary: { mode: 'live' } })).toContain('Cost unavailable.');
+    expect(render([failed], { summary: { ...summary, mode: 'live' } })).toContain('0 passed, 1 failed.\n');
   });
 
   it('colors only an injected TTY and always respects NO_COLOR and non-TTY output', () => {
@@ -188,6 +185,6 @@ describe('pretty reporter', () => {
   it('labels absent model metadata as unavailable', () => {
     const passing = result('evals/a.chat.yaml', 'works', [runResult(1, true, [])]);
 
-    expect(render([passing], { details: { elapsedMs: 230, costIncomplete: false } })).toContain('Model: unavailable');
+    expect(render([passing], { summary: { mode: 'live', elapsedMs: 230, costIncomplete: false } })).toContain('Model: unavailable');
   });
 });

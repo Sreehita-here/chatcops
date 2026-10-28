@@ -1,45 +1,23 @@
 import { styleText } from 'node:util';
 import { dollars } from '../cost.js';
-import { getTestDurationMs } from '../run.js';
 import type { AssertionResult, TestResult } from '../types.js';
-import type { Reporter, ReporterFactory, ReporterOutput, RunSummary } from './index.js';
+import type { ReporterFactory, RunSummary } from './index.js';
 
-interface PrettyReportOptions {
-  verbose?: boolean;
-  env?: Record<string, string | undefined>;
-}
-
-export interface PrettyRunDetails {
-  model?: string;
-  elapsedMs: number;
-  costIncomplete: boolean;
-}
-
-type ConfiguredPrettyReporter = Reporter & { setRunDetails(details: PrettyRunDetails): void };
-
-export function createPrettyReporter(output: ReporterOutput, options: PrettyReportOptions = {}): ConfiguredPrettyReporter {
+export const prettyReporter: ReporterFactory = (output, options = {}) => {
   const env = options.env ?? process.env;
   const colors = 'isTTY' in output && output.isTTY === true && env.NO_COLOR === undefined;
   const paint = (color: 'cyan' | 'green' | 'red' | 'gray', text: string) => (colors ? styleText(color, text, { validateStream: false }) : text);
-  let details: PrettyRunDetails | undefined;
 
   return {
     onEnd(results, summary) {
-      output.write(prettyReport(results, summary, details, options.verbose === true, paint));
-    },
-    setRunDetails(value) {
-      details = value;
+      output.write(prettyReport(results, summary, options.verbose === true, paint));
     },
   };
-}
-
-/** For people: a grouped report with assertion details when useful. */
-export const prettyReporter: ReporterFactory = (output) => createPrettyReporter(output);
+};
 
 function prettyReport(
   results: TestResult[],
   summary: RunSummary,
-  details: PrettyRunDetails | undefined,
   verbose: boolean,
   paint: (color: 'cyan' | 'green' | 'red' | 'gray', text: string) => string
 ): string {
@@ -47,7 +25,7 @@ function prettyReport(
     '',
     paint('cyan', 'ChatCops evaluations'),
     paint('gray', '────────────────────────────────────────'),
-    paint('gray', `Model: ${details?.model ?? 'unavailable'}`),
+    paint('gray', `Model: ${summary.model ?? 'unavailable'}`),
     ...(summary.judge ? [paint('gray', `Judge: ${summary.judge}`)] : []),
     paint('gray', `Mode: ${summary.mode === 'record' ? 'recorded' : summary.mode}`),
     '',
@@ -64,11 +42,11 @@ function prettyReport(
     for (const result of tests) {
       const status = result.pass ? paint('green', '✓') : paint('red', '✗');
       const rate = result.runs.length > 1 ? ` (${result.runs.filter((run) => run.pass).length}/${result.runs.length} runs)` : '';
-      const elapsed = getTestDurationMs(result);
+      const elapsed = result.durationMs;
       const duration = elapsed === undefined ? '' : `  ${formatDuration(elapsed)}`;
       lines.push(`  ${status} ${result.test}${rate}${duration}`);
       if (!result.pass || verbose) {
-        appendDetails(lines, result, paint);
+        appendDetails(lines, result, result.runs.length > 1, paint);
         lines.push('');
       }
     }
@@ -82,8 +60,8 @@ function prettyReport(
     summary.mode === 'replay'
       ? ' Replayed, nothing spent.'
       : summary.costUsd === undefined
-        ? ' Cost unavailable.'
-        : details?.costIncomplete
+        ? ''
+        : summary.costIncomplete
           ? ` Spent about ${dollars(summary.costUsd)} (partial; some calls could not be priced).`
           : ` Spent about ${dollars(summary.costUsd)}.`;
   const judge = summary.judge ? ` Judged by ${summary.judge}.` : '';
@@ -93,7 +71,7 @@ function prettyReport(
     `${paint('green', `${results.length - failed} passed`)}, ${paint(failed ? 'red' : 'gray', `${failed} failed`)}.${cost}${judge}`,
     `Assertions: ${passedAssertions} passed, ${assertions.length - passedAssertions} failed`,
     formatUsage(results),
-    paint('gray', `Elapsed: ${formatDuration(details?.elapsedMs)}`),
+    paint('gray', `Elapsed: ${formatDuration(summary.elapsedMs)}`),
   );
   return `${lines.join('\n')}\n`;
 }
@@ -101,11 +79,12 @@ function prettyReport(
 function appendDetails(
   lines: string[],
   result: TestResult,
+  showRun: boolean,
   paint: (color: 'cyan' | 'green' | 'red' | 'gray', text: string) => string
 ): void {
   for (const run of result.runs) {
     for (const [index, { turn, results: checks }] of run.turns.entries()) {
-      lines.push(paint('gray', `    Run ${run.run} · Turn ${index + 1}`));
+      if (showRun && index === 0) lines.push(paint('gray', `    Run ${run.run}`));
       if (!checks.length) lines.push(paint('gray', '      No assertions for this turn.'));
       for (const check of checks) {
         const status = check.pass ? paint('green', '✓') : paint('red', '✗');

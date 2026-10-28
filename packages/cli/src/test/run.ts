@@ -33,16 +33,6 @@ export interface FixtureJob {
   tests: TestCase[];
 }
 
-const testDurations = new WeakMap<TestResult, number>();
-
-export function recordTestDurationMs(result: TestResult, durationMs: number): void {
-  testDurations.set(result, durationMs);
-}
-
-export function getTestDurationMs(result: TestResult): number | undefined {
-  return testDurations.get(result);
-}
-
 /**
  * Runs every test of the fixtures against the server config, in process: the
  * real request path (knowledge, page context, locale, tools), with fresh
@@ -73,7 +63,7 @@ export async function runFixtures(
           return value;
         });
       });
-      recordTestDurationMs(results[index], performance.now() - started);
+      results[index].durationMs = performance.now() - started;
       options.onResult?.(results[index]);
     }
   };
