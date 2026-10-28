@@ -6,6 +6,12 @@ import { prettyReporter } from './pretty.js';
 /** Where a reporter writes: stdout, unless the reporter is given a file. */
 export interface ReporterOutput {
   write(text: string): unknown;
+  isTTY?: boolean;
+}
+
+export interface ReporterOptions {
+  verbose?: boolean;
+  env?: Record<string, string | undefined>;
 }
 
 /** About the whole run, for the end of a report. */
@@ -17,13 +23,20 @@ export interface RunSummary {
   costUsd?: number;
 }
 
-/** Gets results as tests finish, and all of them at the end. */
-export interface Reporter {
-  onResult?(result: TestResult): void;
-  onEnd?(results: TestResult[], summary: RunSummary): void | Promise<void>;
+/** Additional details for human-readable reports; kept separate from JSON summary data. */
+export interface ReporterRunDetails {
+  model?: string;
+  elapsedMs: number;
+  costIncomplete: boolean;
 }
 
-export type ReporterFactory = (output: ReporterOutput) => Reporter;
+/** Gets results as tests finish, and all of them at the end. */
+export interface Reporter {
+  onResult?(result: TestResult, durationMs?: number): void;
+  onEnd?(results: TestResult[], summary: RunSummary, details?: ReporterRunDetails): void | Promise<void>;
+}
+
+export type ReporterFactory = (output: ReporterOutput, options?: ReporterOptions) => Reporter;
 
 /**
  * The reporters `--reporter` can name. To add one, write it in its own file

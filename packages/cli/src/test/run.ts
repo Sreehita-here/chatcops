@@ -13,7 +13,7 @@ export interface RunOptions {
   /** Overrides each test's `repeat`. */
   repeat?: number;
   /** Called as each test finishes. */
-  onResult?: (result: TestResult) => void;
+  onResult?: (result: TestResult, durationMs: number) => void;
   /** Records or replays each test's HTTP calls. */
   cassettes?: Cassettes;
   /** For `judge` assertions. */
@@ -51,6 +51,7 @@ export async function runFixtures(
     while (next < jobs.length) {
       const index = next++;
       const { file, path, test } = jobs[index];
+      const started = performance.now();
       results[index] = await runTest(file, test, options.repeat, (run) => {
         const once = () => runOnce(server, { file, path, test, run }, options);
         if (!options.cassettes) return once();
@@ -62,7 +63,7 @@ export async function runFixtures(
           return value;
         });
       });
-      options.onResult?.(results[index]);
+      options.onResult?.(results[index], performance.now() - started);
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, options.concurrency ?? 4), jobs.length) }, worker));
