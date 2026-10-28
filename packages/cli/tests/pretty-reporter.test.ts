@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { prettyReporter } from '../src/test/reporters/pretty.js';
-import type { ReporterRunDetails, RunSummary } from '../src/test/reporters/index.js';
+import { createPrettyReporter, type PrettyRunDetails } from '../src/test/reporters/pretty.js';
+import type { RunSummary } from '../src/test/reporters/index.js';
+import { recordTestDurationMs } from '../src/test/run.js';
 import type { AssertionResult, TestResult, TestRunResult, TurnResult } from '../src/test/types.js';
 
 const summary: RunSummary = { mode: 'live' };
-const details: ReporterRunDetails = { model: 'bot-model-1', elapsedMs: 230, costIncomplete: false };
+const details: PrettyRunDetails = { model: 'bot-model-1', elapsedMs: 230, costIncomplete: false };
 
 function assertion(pass: boolean, reason: string): AssertionResult {
   return { assertion: { contains: reason }, pass, reason };
@@ -30,18 +31,17 @@ function runResult(run: number, pass: boolean, turns: TestRunResult['turns'], er
 
 function render(
   results: TestResult[],
-  options: { verbose?: boolean; isTTY?: boolean; env?: Record<string, string | undefined>; summary?: RunSummary; details?: ReporterRunDetails } = {},
+  options: { verbose?: boolean; isTTY?: boolean; env?: Record<string, string | undefined>; summary?: RunSummary; details?: PrettyRunDetails } = {},
   durations = results.map((_, index) => 100 + index)
 ): string {
   let output = '';
-  const reporter = prettyReporter(
-    { write: (text) => (output += text), isTTY: options.isTTY },
-    { verbose: options.verbose, env: options.env ?? {} }
-  );
   results.forEach((value, index) => {
-    reporter.onResult?.(value, durations[index]);
+    recordTestDurationMs(value, durations[index]);
   });
-  reporter.onEnd?.(results, options.summary ?? summary, options.details ?? details);
+  const reportOutput = { write: (text: string) => (output += text), isTTY: options.isTTY };
+  const reporter = createPrettyReporter(reportOutput, { verbose: options.verbose, env: options.env ?? {} });
+  reporter.setRunDetails(options.details ?? details);
+  reporter.onEnd?.(results, options.summary ?? summary);
   return output;
 }
 
@@ -50,11 +50,13 @@ describe('pretty reporter', () => {
     const first = result('first.yaml', 'first test', [runResult(1, true, [])]);
     const second = result('second.yaml', 'second test', [runResult(1, true, [])]);
     let output = '';
-    const reporter = prettyReporter({ write: (text) => (output += text) }, { env: {} });
-    reporter.onResult?.(second, 20);
-    reporter.onResult?.(first, 10);
+    recordTestDurationMs(second, 20);
+    recordTestDurationMs(first, 10);
+    const reportOutput = { write: (text: string) => (output += text) };
+    const reporter = createPrettyReporter(reportOutput, { env: {} });
     expect(output).toBe('');
-    reporter.onEnd?.([first, second], summary, details);
+    reporter.setRunDetails(details);
+    reporter.onEnd?.([first, second], summary);
     expect(output.indexOf('first.yaml')).toBeLessThan(output.indexOf('second.yaml'));
     expect(output).toContain('first test  10 ms');
     expect(output).toContain('second test  20 ms');

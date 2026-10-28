@@ -13,7 +13,7 @@ export interface RunOptions {
   /** Overrides each test's `repeat`. */
   repeat?: number;
   /** Called as each test finishes. */
-  onResult?: (result: TestResult, durationMs: number) => void;
+  onResult?: (result: TestResult) => void;
   /** Records or replays each test's HTTP calls. */
   cassettes?: Cassettes;
   /** For `judge` assertions. */
@@ -31,6 +31,16 @@ export interface FixtureJob {
   path?: string;
   fixture: Fixture;
   tests: TestCase[];
+}
+
+const testDurations = new WeakMap<TestResult, number>();
+
+export function recordTestDurationMs(result: TestResult, durationMs: number): void {
+  testDurations.set(result, durationMs);
+}
+
+export function getTestDurationMs(result: TestResult): number | undefined {
+  return testDurations.get(result);
 }
 
 /**
@@ -63,7 +73,8 @@ export async function runFixtures(
           return value;
         });
       });
-      options.onResult?.(results[index], performance.now() - started);
+      recordTestDurationMs(results[index], performance.now() - started);
+      options.onResult?.(results[index]);
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, options.concurrency ?? 4), jobs.length) }, worker));

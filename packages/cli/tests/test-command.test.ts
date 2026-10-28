@@ -66,8 +66,9 @@ function project(files: Record<string, string>, config = CONFIG): string {
 async function run(args: string[], cwd: string, env: Record<string, string | undefined> = {}, isTTY = false) {
   let stdout = '';
   let stderr = '';
+  const stdoutStream = { write: (text: string) => (stdout += text), isTTY };
   // An empty env, so CI=true on the CI machine doesn't switch these runs to replay.
-  const code = await main(args, { stdout: { write: (t: string) => (stdout += t), isTTY }, stderr: { write: (t: string) => (stderr += t) }, cwd, env });
+  const code = await main(args, { stdout: stdoutStream, stderr: { write: (text: string) => (stderr += text) }, cwd, env });
   return { code, stdout, stderr };
 }
 

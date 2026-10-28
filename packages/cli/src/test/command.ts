@@ -10,6 +10,7 @@ import { resolveJudge } from './judge.js';
 import { DEFAULT_PATTERN, findFixtures, loadFixture, matchesFilter } from './load.js';
 import type { CassetteMode, Cassettes } from './cassette.js';
 import { runFixtures, withMocks, withoutKeys, type FixtureJob } from './run.js';
+import { createPrettyReporter } from './reporters/pretty.js';
 import { REPORTERS } from './reporters/index.js';
 
 /** `chatcops test`: finds and checks the eval files, runs them, reports. Exit 0 all passed, 1 some failed, 2 couldn't run. */
@@ -47,10 +48,14 @@ export async function runTests(
   }
   if (!fixtures.length) throw new ConfigError(`No tests match --filter ${values.filter}.`);
 
+  const prettyReporters: Array<ReturnType<typeof createPrettyReporter>> = [];
   const reporters = (values.reporter?.length ? values.reporter : [values.json ? 'json' : 'pretty']).map((name) => {
     const reporter = REPORTERS.get(name);
     if (!reporter) throw new ConfigError(`--reporter ${name} doesn't exist. Use one of: ${[...REPORTERS.keys()].join(', ')}.`);
-    return reporter(io.stdout, { verbose: values.verbose === true, env: io.env ?? process.env });
+    if (name !== 'pretty') return reporter(io.stdout);
+    const pretty = createPrettyReporter(io.stdout, { verbose: values.verbose === true, env: io.env ?? process.env });
+    prettyReporters.push(pretty);
+    return pretty;
   });
   if (values.json && values.reporter?.length) throw new ConfigError('Use --reporter json, or --json, not both.');
 
@@ -101,8 +106,8 @@ export async function runTests(
     spend,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ...(repeat !== undefined ? { repeat } : {}),
-    onResult: (result, durationMs) => {
-      for (const reporter of reporters) reporter.onResult?.(result, durationMs);
+    onResult: (result) => {
+      for (const reporter of reporters) reporter.onResult?.(result);
     },
   });
   const elapsedMs = performance.now() - started;
@@ -118,7 +123,8 @@ export async function runTests(
     );
   const summary = { mode, ...(judge ? { judge: judge.id } : {}), ...(priced.length ? { costUsd: priced.reduce((a, b) => a + b, 0) } : {}) };
   const details = { ...(bot.model ? { model: bot.model } : {}), elapsedMs, costIncomplete };
-  for (const reporter of reporters) await reporter.onEnd?.(results, summary, details);
+  for (const reporter of prettyReporters) reporter.setRunDetails(details);
+  for (const reporter of reporters) await reporter.onEnd?.(results, summary);
   if (cassettes?.mode === 'record') {
     const written = await cassettes.save(
       fixtures.map((job) => ({ path: job.path ?? job.file, ran: job.tests.map((t) => t.name), all: job.fixture.tests.map((t) => t.name) }))

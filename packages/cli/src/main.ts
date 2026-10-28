@@ -8,7 +8,7 @@ import { Cassettes } from './test/cassette.js';
 import { cassetteMode, runTests } from './test/command.js';
 
 export interface Io {
-  stdout: { write(text: string): unknown; isTTY?: boolean };
+  stdout: { write(text: string): unknown };
   stderr: { write(text: string): unknown };
   cwd: string;
   /** Defaults to `process.env`. `chatcops test` reads `CI`. */

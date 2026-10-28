@@ -1,31 +1,46 @@
 import { styleText } from 'node:util';
 import { dollars } from '../cost.js';
+import { getTestDurationMs } from '../run.js';
 import type { AssertionResult, TestResult } from '../types.js';
-import type { ReporterFactory, ReporterRunDetails, RunSummary } from './index.js';
+import type { Reporter, ReporterFactory, ReporterOutput, RunSummary } from './index.js';
 
-/** For people: a grouped report with assertion details when useful. */
-export const prettyReporter: ReporterFactory = (output, options = {}) => {
-  const durations = new Map<TestResult, number>();
+interface PrettyReportOptions {
+  verbose?: boolean;
+  env?: Record<string, string | undefined>;
+}
+
+export interface PrettyRunDetails {
+  model?: string;
+  elapsedMs: number;
+  costIncomplete: boolean;
+}
+
+type ConfiguredPrettyReporter = Reporter & { setRunDetails(details: PrettyRunDetails): void };
+
+export function createPrettyReporter(output: ReporterOutput, options: PrettyReportOptions = {}): ConfiguredPrettyReporter {
   const env = options.env ?? process.env;
-  const colors = output.isTTY === true && env.NO_COLOR === undefined;
+  const colors = 'isTTY' in output && output.isTTY === true && env.NO_COLOR === undefined;
   const paint = (color: 'cyan' | 'green' | 'red' | 'gray', text: string) => (colors ? styleText(color, text, { validateStream: false }) : text);
+  let details: PrettyRunDetails | undefined;
 
   return {
-    onResult(result, durationMs) {
-      if (durationMs !== undefined) durations.set(result, durationMs);
+    onEnd(results, summary) {
+      output.write(prettyReport(results, summary, details, options.verbose === true, paint));
     },
-    onEnd(results, summary, details) {
-      output.write(prettyReport(results, summary, details, options.verbose === true, durations, paint));
+    setRunDetails(value) {
+      details = value;
     },
   };
-};
+}
+
+/** For people: a grouped report with assertion details when useful. */
+export const prettyReporter: ReporterFactory = (output) => createPrettyReporter(output);
 
 function prettyReport(
   results: TestResult[],
   summary: RunSummary,
-  details: ReporterRunDetails | undefined,
+  details: PrettyRunDetails | undefined,
   verbose: boolean,
-  durations: Map<TestResult, number>,
   paint: (color: 'cyan' | 'green' | 'red' | 'gray', text: string) => string
 ): string {
   const lines = [
@@ -49,7 +64,7 @@ function prettyReport(
     for (const result of tests) {
       const status = result.pass ? paint('green', '✓') : paint('red', '✗');
       const rate = result.runs.length > 1 ? ` (${result.runs.filter((run) => run.pass).length}/${result.runs.length} runs)` : '';
-      const elapsed = durations.get(result);
+      const elapsed = getTestDurationMs(result);
       const duration = elapsed === undefined ? '' : `  ${formatDuration(elapsed)}`;
       lines.push(`  ${status} ${result.test}${rate}${duration}`);
       if (!result.pass || verbose) {
