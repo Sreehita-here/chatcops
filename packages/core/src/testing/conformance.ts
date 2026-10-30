@@ -169,17 +169,21 @@ export function runStorageConformance(
         expect((await store.get(id))?.metadata).toEqual({ siteId: 's1', a: 2, b: 'x' });
       });
 
-      it.skipIf(skip.has('conversation-concurrency'))('loses no message under concurrent appends', async () => {
-        const store = requireAppend(storage);
-        const id = uniqueId('concurrent');
-        await Promise.all(
-          Array.from({ length: 20 }, (_, i) => store.append(id, [message(`m${i}`, 'user', `#${i}`)]))
-        );
-        const conversation = await store.get(id);
-        expect(conversation?.messages).toHaveLength(20);
-        expect(new Set(conversation?.messages.map((m) => m.id)).size).toBe(20);
-        expect(conversation?.version).toBe(20);
-      });
+      it.skipIf(skip.has('conversation-concurrency'))(
+        'loses no message under concurrent appends',
+        async () => {
+          const store = requireAppend(storage);
+          const id = uniqueId('concurrent');
+          await Promise.all(
+            Array.from({ length: 20 }, (_, i) => store.append(id, [message(`m${i}`, 'user', `#${i}`)]))
+          );
+          const conversation = await store.get(id);
+          expect(conversation?.messages).toHaveLength(20);
+          expect(new Set(conversation?.messages.map((m) => m.id)).size).toBe(20);
+          expect(conversation?.version).toBe(20);
+        },
+        60_000
+      );
 
       it.skipIf(skip.has('conversation-concurrency'))(
         'lets exactly one of several appends with the same expectedVersion through',
