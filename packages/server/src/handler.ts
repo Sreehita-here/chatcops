@@ -40,12 +40,11 @@ import { logSecurityAtStartup } from './security/startup-checks.js';
 import { VISITOR_CONTEXT_INSTRUCTION, buildVisitorContext, isLocaleTag, withVisitorContext } from './visitor-context.js';
 import { WebhookDispatcher } from './webhook.js';
 import { historyBefore, knowledgeContext } from './knowledge.js';
+import { rejectRemovedOptions } from './removed-options.js';
 
 export function createChatHandler(config: ChatCopsServerConfig) {
+  rejectRemovedOptions(config);
   const log = config.logger ?? consoleLogger();
-  if (config.i18n) {
-    log.warn('deprecated_option', 'The `i18n` option is deprecated and ignored. Set the widget text with its `strings` option.');
-  }
 
   const providerPromise = isAIProvider(config.provider)
     ? Promise.resolve(config.provider)
@@ -57,17 +56,14 @@ export function createChatHandler(config: ChatCopsServerConfig) {
   providerPromise.catch((err) => {
     log.error('provider_setup_failed', `Provider setup failed: ${err instanceof Error ? err.message : String(err)}`);
   });
-  if (config.storage && config.conversationStore) {
-    throw new Error('Set `storage` or `conversationStore`, not both. `storage.conversations` replaces `conversationStore`.');
-  }
-  if (!config.storage && !config.conversationStore && onServerless() && !warnedMemoryStorage) {
+  if (!config.storage && onServerless() && !warnedMemoryStorage) {
     warnedMemoryStorage = true;
     log.warn(
       'memory_storage',
       'No `storage` is set, so conversations are kept in memory. On serverless each instance has its own memory, so a conversation can lose its history between messages. Use a store package such as @chatcops/store-postgres or @chatcops/store-redis.'
     );
   }
-  const storage = config.storage ?? (config.conversationStore ? { conversations: config.conversationStore } : undefined);
+  const { storage } = config;
   const conversations = new ConversationManager({ ...(storage ? { storage } : {}), logger: log });
   // Counted in the storage's counters when it has them, so limits and
   // budgets hold across every server instance; otherwise in this process.
@@ -81,6 +77,10 @@ export function createChatHandler(config: ChatCopsServerConfig) {
   }
   const rateLimit = { maxRequests: 30, windowMs: 60_000, ...config.rateLimit };
   if (rateLimit.maxRequests <= 0) throw new Error('maxRequests must be greater than 0');
+  const retentionDays = config.retention?.conversationsDays;
+  if (retentionDays !== undefined && (!Number.isFinite(retentionDays) || retentionDays <= 0)) {
+    throw new Error('retention.conversationsDays must be a number greater than 0');
+  }
   const rateLimiter = createRateLimiter(counters, {
     limit: rateLimit.maxRequests,
     windowMs: rateLimit.windowMs,
@@ -146,7 +146,7 @@ export function createChatHandler(config: ChatCopsServerConfig) {
       loggedLegacyFormat = true;
       log.info(
         'legacy_stream_format',
-        'Answered a request in the 0.5 stream format, from a widget older than 0.6 or a client that doesn\'t send `protocol: 1`. That format keeps working until 1.0.'
+        'Answered a request in the 0.5 stream format, from a widget older than 0.6 or a client that doesn\'t send `protocol: 1`. That format keeps working through 1.x and goes away in 2.0.'
       );
     }
 

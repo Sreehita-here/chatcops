@@ -22,7 +22,7 @@ afterAll(async () => {
  * the same in-memory storage (kept on globalThis), so one can build an index
  * and another search it.
  */
-function project(options: { shared: string; embedderId?: string; body?: string } = { shared: 'default' }): string {
+function project(options: { shared: string; embedderId?: string; index?: string; body?: string } = { shared: 'default' }): string {
   const dir = mkdtempSync(join(TMP, 'project-'));
   const embedderId = options.embedderId ?? 'test:fake@4';
   writeFileSync(
@@ -42,7 +42,7 @@ export default {
       return texts.map((t) => Float32Array.from([1, /refund/i.test(t) ? 5 : 0, /pricing|plan/i.test(t) ? 5 : 0, 1]));
     },
   },
-  ingest: { sources: [{ type: 'urls', urls: ['${site.url}/pricing'] }] },
+  ingest: { ${options.index ? `index: '${options.index}', ` : ''}sources: [{ type: 'urls', urls: ['${site.url}/pricing'] }] },
 };
 `
   );
@@ -61,7 +61,7 @@ describe('chatcops', () => {
     const cwd = TMP;
     expect((await run(['--help'], cwd)).stdout).toContain('chatcops ingest [options]');
     expect(await run([], cwd)).toMatchObject({ code: EXIT.unusable });
-    expect((await run(['--version'], cwd)).stdout).toMatch(/^\d+\.\d+\.\d+\n$/);
+    expect((await run(['--version'], cwd)).stdout).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?\n$/);
     expect(await run(['deploy'], cwd)).toMatchObject({ code: EXIT.unusable, stderr: expect.stringContaining('Unknown command "deploy"') });
     expect(await run(['ingest', '--nope'], cwd)).toMatchObject({ code: EXIT.unusable, stderr: expect.stringContaining("Unknown option '--nope'") });
     expect(await run(['ingest', '--max-pages', 'ten'], cwd)).toMatchObject({ code: EXIT.unusable, stderr: expect.stringContaining('--max-pages takes a whole number') });
@@ -140,6 +140,19 @@ describe('chatcops', () => {
     expect(await run(['ingest'], other)).toMatchObject({ code: EXIT.unusable, stderr: expect.stringContaining('Index "default" was built with test:fake@4') });
   });
 
+  it('searches the index named in ingest.index', async () => {
+    const cwd = project({ shared: 'named', index: 'docs' });
+    await run(['ingest'], cwd);
+    const json = await run(['search', 'pricing', '--json'], cwd);
+    expect(json.stderr).not.toContain(`hasn't been built yet`);
+    const result = JSON.parse(json.stdout) as { index: string; chunks: Array<{ source: { url: string } }> };
+    expect(result.index).toBe('docs');
+    expect(result.chunks[0].source.url).toBe(`${site.url}/pricing`);
+
+    const other = project({ shared: 'named', index: 'docs', embedderId: 'other:model@4' });
+    expect(await run(['search', 'pricing'], other)).toMatchObject({ code: EXIT.unusable, stderr: expect.stringContaining('Index "docs" was built with test:fake@4') });
+  });
+
   it('says so when searching an index that was never built, and needs a question', async () => {
     const cwd = project({ shared: 'never' });
     const result = await run(['search', 'anything'], cwd);
@@ -167,6 +180,6 @@ describe('the built command', () => {
   it('runs from dist/bin.js', () => {
     const bin = resolve(__dirname, '../dist/bin.js');
     const out = execFileSync(process.execPath, [bin, '--version'], { encoding: 'utf8' });
-    expect(out).toMatch(/^\d+\.\d+\.\d+\n$/);
+    expect(out).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?\n$/);
   });
 });

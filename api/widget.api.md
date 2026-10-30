@@ -25,6 +25,7 @@ declare const _default: {
         token?: string;
     } | null): void;
     setContext(data: Record<string, string> | null): void;
+    setConsent(value: boolean): void;
     update(changes: WidgetUpdate): void;
     destroy(): void;
     on<E extends WidgetEventType>(event: E, handler: WidgetEventHandler<E>): () => void;
@@ -83,10 +84,13 @@ export interface ThemeConfig {
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
+export type UserToken = string | (() => string | undefined | Promise<string | undefined>);
+
 export declare class Widget {
     get isInline(): boolean;
     constructor(config: WidgetConfig);
     init(): void;
+    setConsent(consent: boolean): void;
     open(): void;
     close(): void;
     toggle(): void;
@@ -109,9 +113,10 @@ export declare class Widget {
 
 export interface WidgetConfig {
     apiUrl: string;
+    nonce?: string;
     timeout?: number;
     turnstileSiteKey?: string;
-    userToken?: string;
+    userToken?: UserToken;
     mode?: 'popup' | 'inline';
     siteId?: string;
     container?: string | HTMLElement;
@@ -135,7 +140,6 @@ export interface WidgetConfig {
     placeholder?: string;
     persistence?: Persistence;
     historyTtlDays?: number;
-    persistHistory?: boolean;
     maxMessages?: number;
     pageContext?: boolean;
     autoOpen?: boolean | number;
@@ -149,6 +153,8 @@ export interface WidgetConfig {
     onError?: (error: Error) => void;
     onLeadCaptured?: (leadData?: Record<string, unknown>) => void;
     onPreChatSubmit?: (data: Record<string, string>) => void;
+    waitForConsent?: boolean;
+    onConsentRequest?: () => void;
 }
 
 export type WidgetEventHandler<E extends WidgetEventType = WidgetEventType> = (...args: WidgetEvents[E]) => void;
@@ -209,6 +215,8 @@ export interface WidgetLocaleStrings {
     sourcesLabel: string;
     disclosure: string;
     disclosureLearnMore: string;
+    consentNotice: string;
+    consentButton: string;
 }
 
 export type WidgetUpdate = Pick<WidgetConfig, 'branding' | 'welcomeMessage' | 'disclosure' | 'suggestions' | 'placeholder' | 'strings'> & {

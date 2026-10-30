@@ -15,6 +15,8 @@ It exits 0 when every test passed, 1 when some failed, and 2 when it couldn't ru
 
 `chatcops test` reads the `server` section of `chatcops.config.ts`. It's the same config you give the server: the provider, system prompt, tools and knowledge.
 
+The command, its flags and `defineConfig` are `@chatcops/cli`'s API. The package exports more (the runner, the assertion and reporter registries) for its own use, and those can change in a minor release until the CLI reaches 1.0.
+
 ```ts
 import { LeadCaptureTool } from '@chatcops/core';
 import { defineConfig } from '@chatcops/cli';
@@ -60,7 +62,14 @@ tests:
           - contains: "$190"
 ```
 
-Each assertion has one key. `contains` takes a string or a list of strings that must all appear in the reply, `judge` has a model grade the reply ([below](#judged-by-a-model)), and every assertion also works with a `not-` prefix to say the opposite. An assertion name that doesn't exist fails the whole run before anything is sent, so a typo can't make a test pass by checking nothing.
+Each assertion has one key. `judge` has a model grade the reply ([below](#judged-by-a-model)), and every assertion also works with a `not-` prefix to say the opposite. An assertion name that doesn't exist fails the whole run before anything is sent, so a typo can't make a test pass by checking nothing.
+
+Four assertions check what the reply says:
+
+- `contains`: takes a string or a list of strings that must all appear in the reply (`contains: "$19"` or `contains: [Team, "$19"]`).
+- `icontains`: case-insensitive substring matching; takes a string or a list of strings (`icontains: team` or `icontains: [team, "$19"]`).
+- `regex`: matches the reply against a JavaScript `RegExp`. Accepts a pattern string (`regex: "\\$\\d+"`) or `{ pattern, flags }` (`regex: { pattern: "team", flags: "i" }`).
+- `equals`: compares the trimmed reply with the exact expected string (`equals: "The Team plan is $19."`).
 
 Three assertions catch a prompt change that makes replies longer, slower or more expensive:
 
@@ -72,6 +81,11 @@ Two assertions check what ChatCops adds to a reply:
 
 - `cites` takes a URL glob, or a list of them, and each has to match a page the reply cites (`cites: "https://acme.test/pricing*"`). Globs work the same as in `ingest.include`. `cites: true` means it cites at least one page.
 - `lead-captured: true` means the turn captured a lead. An object, such as `lead-captured: { email: jane@acme.test }`, also has to match those fields of the lead.
+
+Two assertions check tool calls made during a turn:
+
+- `calls-tool` asserts that the bot called a tool. It takes either a tool name (`calls-tool: lookup_order`) or `{ name, args }` to also check inputs (`calls-tool: { name: lookup_order, args: { id: "A-1001" } }`). Arguments match partially: every specified key must match, nested objects follow the same rule, extra input keys are allowed, and arrays must match exactly.
+- `no-tool-call: true` asserts that no tool was called during the turn. It also takes a tool name (`no-tool-call: cancel_order`) to assert that the specific tool was not called, even if other tools were called.
 
 A test can also set:
 
@@ -97,6 +111,9 @@ tests:
     turns:
       - user: Where is order A-1001?
         expect:
+          - calls-tool: lookup_order
+          - calls-tool: { name: lookup_order, args: { id: "A-1001" } }
+          - no-tool-call: cancel_order
           - contains: shipped
 ```
 

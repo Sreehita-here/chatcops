@@ -99,6 +99,32 @@ describe('chatcops test', () => {
     expect(stdout).toContain('2 passed, 0 failed.');
   });
 
+  it('runs an eval file exercising icontains, regex, and equals assertions', async () => {
+    const files = {
+      'evals/text-assertions.chat.yaml': `version: 1
+name: Text Assertions
+tests:
+  - name: checks icontains, regex, and equals
+    turns:
+      - user: What's the price of Team?
+        expect:
+          - icontains: team
+          - icontains: ["$19", MONTH]
+          - not-icontains: pro
+          - regex: '\\$\\d+'
+          - regex: { pattern: "team plan", flags: "i" }
+          - not-regex: "^Pro"
+          - equals: "The Team plan is $19 a month."
+          - not-equals: "The Pro plan is $29 a month."
+`,
+    };
+    const { code, stdout, stderr } = await run(['test'], project(files));
+    expect(stderr).toBe('');
+    expect(code).toBe(EXIT.ok);
+    expect(stdout).toContain(`${join('evals', 'text-assertions.chat.yaml')}\n  ✓ checks icontains, regex, and equals`);
+    expect(stdout).toContain('1 passed, 0 failed.');
+  });
+
   it('exits 1 on a failed assertion and says why, with the reply', async () => {
     const dir = project({
       'evals/pricing.chat.yaml': `version: 1
@@ -175,6 +201,38 @@ tests:
     expect(turn.toolCalls).toEqual([{ name: 'lookup_order', input: { id: 'A-1' } }]);
     expect(turn.usage).toEqual({ inputTokens: 20, outputTokens: 10 });
     expect(turn.finishReason).toBe('stop');
+  });
+
+  it('verifies tool calls with calls-tool and no-tool-call', async () => {
+    const files = {
+      'evals/tools.chat.yaml': `version: 1
+name: Tool Calls
+defaults:
+  mocks:
+    tools:
+      lookup_order: { success: true, data: { status: "shipped" } }
+tests:
+  - name: asserts tool call and arguments
+    turns:
+      - user: where is my order?
+        expect:
+          - calls-tool: lookup_order
+          - calls-tool: { name: lookup_order, args: { id: "A-1" } }
+          - no-tool-call: other_tool
+          - contains: shipped
+  - name: asserts no tool was called
+    turns:
+      - user: hi
+        expect:
+          - no-tool-call: true
+          - not-calls-tool: lookup_order
+          - contains: Hello
+`,
+    };
+    const { code, stdout } = await run(['test', '--json'], project(files));
+    expect(code).toBe(EXIT.ok);
+    const report = JSON.parse(stdout);
+    expect(report).toMatchObject({ passed: 2, failed: 0 });
   });
 
   it('fails a test whose turn errors, and stops that run', async () => {
@@ -380,6 +438,84 @@ describe('assertions', () => {
     expect(await check({ 'not-contains': 'Team' }, turn, [turn])).toMatchObject({ pass: false, reason: 'expected not: the reply contains "Team"' });
   });
 
+  it('icontains matches case-insensitively, and not- inverts it', async () => {
+    expect(await check({ icontains: ['team', '$19'] }, turn, [turn])).toMatchObject({ pass: true });
+    expect(await check({ icontains: 'TEAM' }, turn, [turn])).toMatchObject({ pass: true });
+    expect(await check({ icontains: ['team', 'pro'] }, turn, [turn])).toMatchObject({ pass: false, reason: 'the reply doesn\'t contain "pro"' });
+    expect(await check({ 'not-icontains': 'pro' }, turn, [turn])).toMatchObject({ pass: true });
+    expect(await check({ 'not-icontains': 'team' }, turn, [turn])).toMatchObject({ pass: false, reason: 'expected not: the reply contains "team"' });
+    expect(await check({ icontains: 19 }, turn, [turn])).toMatchObject({ pass: false, reason: 'icontains takes a string or a list of strings' });
+    expect(await check({ icontains: [] }, turn, [turn])).toMatchObject({ pass: false, reason: 'icontains takes a string or a list of strings' });
+    expect(await check({ 'not-icontains': 19 }, turn, [turn])).toMatchObject({ pass: false, reason: 'icontains takes a string or a list of strings' });
+  });
+
+  it('regex matches the reply with a pattern or { pattern, flags }, and not- inverts it', async () => {
+    expect(await check({ regex: '\\$\\d+' }, turn, [turn])).toMatchObject({ pass: true, reason: 'the reply matches /\\$\\d+/' });
+    expect(await check({ regex: { pattern: 'team', flags: 'i' } }, turn, [turn])).toMatchObject({ pass: true, reason: 'the reply matches /team/i' });
+    expect(await check({ regex: { pattern: '\\$\\d+' } }, turn, [turn])).toMatchObject({ pass: true, reason: 'the reply matches /\\$\\d+/' });
+    expect(await check({ regex: 'pro' }, turn, [turn])).toMatchObject({ pass: false, reason: "the reply doesn't match /pro/" });
+    expect(await check({ regex: { pattern: '^team' } }, turn, [turn])).toMatchObject({ pass: false, reason: "the reply doesn't match /^team/" });
+    expect(await check({ 'not-regex': 'pro' }, turn, [turn])).toMatchObject({ pass: true });
+    expect(await check({ 'not-regex': '\\$\\d+' }, turn, [turn])).toMatchObject({ pass: false, reason: 'expected not: the reply matches /\\$\\d+/' });
+    expect(await check({ 'not-regex': { pattern: 'team', flags: 'i' } }, turn, [turn])).toMatchObject({ pass: false, reason: 'expected not: the reply matches /team/i' });
+
+    expect(await check({ regex: '(' }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: "(" isn\'t a valid regular expression (Unterminated group)',
+    });
+    expect(await check({ 'not-regex': '(' }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: "(" isn\'t a valid regular expression (Unterminated group)',
+    });
+    expect(await check({ regex: { pattern: '(' } }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: "(" isn\'t a valid regular expression (Unterminated group)',
+    });
+    expect(await check({ regex: { pattern: 'a', flags: 'zz' } }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: flags "zz" aren\'t valid regular expression flags',
+    });
+    expect(await check({ 'not-regex': { pattern: 'a', flags: 'zz' } }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: flags "zz" aren\'t valid regular expression flags',
+    });
+    expect(await check({ regex: '[' }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: "[" isn\'t a valid regular expression (Unterminated character class)',
+    });
+    expect(await check({ regex: { pattern: '[' } }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: "[" isn\'t a valid regular expression (Unterminated character class)',
+    });
+    expect(await check({ regex: { pattern: 'team', flags: 'invalid' } }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'regex: flags "invalid" aren\'t valid regular expression flags',
+    });
+    expect(await check({ regex: { pattern: 'team', flags: 123 } }, turn, [turn])).toMatchObject({ pass: false, reason: 'regex flags must be a string' });
+    for (const bad of [19, null, [], {}, { pattern: 19 }, { pattern: 'team', extra: 1 }]) {
+      expect(await check({ regex: bad }, turn, [turn])).toMatchObject({ pass: false, reason: 'regex takes a pattern string or { pattern, flags }' });
+      expect(await check({ 'not-regex': bad }, turn, [turn])).toMatchObject({ pass: false, reason: 'regex takes a pattern string or { pattern, flags }' });
+    }
+  });
+
+  it('equals compares the trimmed reply with the expected string, and not- inverts it', async () => {
+    expect(await check({ equals: 'The Team plan is $19.' }, turn, [turn])).toMatchObject({ pass: true, reason: 'the reply equals "The Team plan is $19."' });
+    const padded: TurnResult = { ...turn, text: '  The Team plan is $19. \n' };
+    expect(await check({ equals: 'The Team plan is $19.' }, padded, [padded])).toMatchObject({ pass: true });
+    expect(await check({ equals: 'The Team plan is $19.\n' }, turn, [turn])).toMatchObject({ pass: true, reason: 'the reply equals "The Team plan is $19.\\n"' });
+    expect(await check({ equals: 'The Team plan is $19.\n' }, padded, [padded])).toMatchObject({ pass: true });
+    expect(await check({ equals: 'The Pro plan is $29.' }, turn, [turn])).toMatchObject({ pass: false, reason: 'the reply doesn\'t equal "The Pro plan is $29."' });
+    expect(await check({ equals: 'The Pro plan is $29.\n' }, turn, [turn])).toMatchObject({ pass: false, reason: 'the reply doesn\'t equal "The Pro plan is $29.\\n"' });
+    expect(await check({ 'not-equals': 'The Pro plan is $29.' }, turn, [turn])).toMatchObject({ pass: true });
+    expect(await check({ 'not-equals': 'The Pro plan is $29.\n' }, turn, [turn])).toMatchObject({ pass: true });
+    expect(await check({ 'not-equals': 'The Team plan is $19.' }, turn, [turn])).toMatchObject({ pass: false, reason: 'expected not: the reply equals "The Team plan is $19."' });
+    expect(await check({ 'not-equals': 'The Team plan is $19.\n' }, turn, [turn])).toMatchObject({ pass: false, reason: 'expected not: the reply equals "The Team plan is $19.\\n"' });
+    for (const bad of [19, null, [], {}, true]) {
+      expect(await check({ equals: bad }, turn, [turn])).toMatchObject({ pass: false, reason: 'equals takes a string' });
+      expect(await check({ 'not-equals': bad }, turn, [turn])).toMatchObject({ pass: false, reason: 'equals takes a string' });
+    }
+  });
+
   it('reports bad values and unknown names as failures', async () => {
     expect(await check({ contains: 19 }, turn, [turn])).toMatchObject({ pass: false, reason: 'contains takes a string or a list of strings' });
     expect(await check({ contains: [] }, turn, [turn])).toMatchObject({ pass: false });
@@ -463,6 +599,242 @@ describe('assertions', () => {
     expect(await check({ 'not-lead-captured': { name: 'Joe' } }, lead, [lead])).toMatchObject({ pass: true });
     for (const value of [false, 'jane@acme.test', {}, [], null]) {
       expect(await check({ 'lead-captured': value }, lead, [lead])).toMatchObject({ pass: false, reason: 'lead-captured takes true, or the fields the lead should have' });
+    }
+  });
+
+  it('calls-tool matches by name, partial args, nested args, and arrays exactly', async () => {
+    const withCall: TurnResult = {
+      ...turn,
+      toolCalls: [
+        {
+          name: 'lookup_order',
+          input: {
+            id: 'A-1',
+            status: 'open',
+            details: { priority: 'high', tags: ['urgent', 'billing'] },
+            meta: { extra: true },
+          },
+        },
+      ],
+    };
+
+    // Name-only matching (string or object)
+    expect(await check({ 'calls-tool': 'lookup_order' }, withCall, [withCall])).toMatchObject({
+      pass: true,
+      reason: 'the turn called "lookup_order"',
+    });
+    expect(await check({ 'calls-tool': { name: 'lookup_order' } }, withCall, [withCall])).toMatchObject({
+      pass: true,
+      reason: 'the turn called "lookup_order"',
+    });
+    expect(await check({ 'calls-tool': 'cancel_order' }, withCall, [withCall])).toMatchObject({
+      pass: false,
+    });
+
+    // Partial arguments
+    expect(await check({ 'calls-tool': { name: 'lookup_order', args: { id: 'A-1' } } }, withCall, [withCall])).toMatchObject({
+      pass: true,
+      reason: 'the turn called "lookup_order" with {"id":"A-1"}',
+    });
+    expect(await check({ 'calls-tool': { name: 'lookup_order', args: { id: 'A-1', status: 'open' } } }, withCall, [withCall])).toMatchObject({
+      pass: true,
+    });
+    expect(await check({ 'calls-tool': { name: 'lookup_order', args: { id: 'A-2' } } }, withCall, [withCall])).toMatchObject({
+      pass: false,
+    });
+
+    // Nested arguments
+    expect(
+      await check(
+        { 'calls-tool': { name: 'lookup_order', args: { details: { priority: 'high' } } } },
+        withCall,
+        [withCall],
+      ),
+    ).toMatchObject({ pass: true });
+    expect(
+      await check(
+        { 'calls-tool': { name: 'lookup_order', args: { details: { priority: 'low' } } } },
+        withCall,
+        [withCall],
+      ),
+    ).toMatchObject({ pass: false });
+
+    // Array arguments must match exactly
+    expect(
+      await check(
+        { 'calls-tool': { name: 'lookup_order', args: { details: { tags: ['urgent', 'billing'] } } } },
+        withCall,
+        [withCall],
+      ),
+    ).toMatchObject({ pass: true });
+    expect(
+      await check(
+        { 'calls-tool': { name: 'lookup_order', args: { details: { tags: ['urgent'] } } } },
+        withCall,
+        [withCall],
+      ),
+    ).toMatchObject({ pass: false });
+    expect(
+      await check(
+        { 'calls-tool': { name: 'lookup_order', args: { details: { tags: ['billing', 'urgent'] } } } },
+        withCall,
+        [withCall],
+      ),
+    ).toMatchObject({ pass: false });
+
+    // Arrays containing objects must match elements exactly, not partially
+    const orderWithItems: TurnResult = {
+      ...turn,
+      toolCalls: [{ name: 'checkout', input: { items: [{ sku: 1, qty: 2 }] } }],
+    };
+    expect(
+      await check(
+        { 'calls-tool': { name: 'checkout', args: { items: [{ sku: 1 }] } } },
+        orderWithItems,
+        [orderWithItems],
+      ),
+    ).toMatchObject({ pass: false });
+    expect(
+      await check(
+        { 'calls-tool': { name: 'checkout', args: { items: [{ sku: 1, qty: 2 }] } } },
+        orderWithItems,
+        [orderWithItems],
+      ),
+    ).toMatchObject({ pass: true });
+  });
+
+  it('calls-tool and no-tool-call report mismatches with actionable actual calls', async () => {
+    const withCall: TurnResult = {
+      ...turn,
+      toolCalls: [{ name: 'lookup_order', input: { id: 'A-1' } }],
+    };
+    const multiCall: TurnResult = {
+      ...turn,
+      toolCalls: [
+        { name: 'lookup_order', input: { id: 'A-1' } },
+        { name: 'send_email', input: { to: 'jane@acme.test' } },
+      ],
+    };
+
+    // No calls made
+    expect(await check({ 'calls-tool': 'lookup_order' }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'the turn didn\'t call "lookup_order" (it called no tools)',
+    });
+    expect(await check({ 'calls-tool': { name: 'lookup_order', args: { id: 'A-1' } } }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'the turn didn\'t call "lookup_order" with {"id":"A-1"} (it called no tools)',
+    });
+
+    // Mismatched name or args shows actual calls
+    expect(await check({ 'calls-tool': 'cancel_order' }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'the turn didn\'t call "cancel_order" (it called lookup_order({"id":"A-1"}))',
+    });
+    expect(await check({ 'calls-tool': { name: 'lookup_order', args: { id: 'A-2' } } }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'the turn didn\'t call "lookup_order" with {"id":"A-2"} (it called lookup_order({"id":"A-1"}))',
+    });
+    expect(await check({ 'calls-tool': 'cancel_order' }, multiCall, [multiCall])).toMatchObject({
+      pass: false,
+      reason: 'the turn didn\'t call "cancel_order" (it called lookup_order({"id":"A-1"}), send_email({"to":"jane@acme.test"}))',
+    });
+  });
+
+  it('no-tool-call handles boolean true and tool name string', async () => {
+    const withCall: TurnResult = {
+      ...turn,
+      toolCalls: [{ name: 'lookup_order', input: { id: 'A-1' } }],
+    };
+
+    // no-tool-call: true passes only when no tools called
+    expect(await check({ 'no-tool-call': true }, turn, [turn])).toMatchObject({
+      pass: true,
+      reason: 'the turn called no tools',
+    });
+    expect(await check({ 'no-tool-call': true }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'the turn called lookup_order({"id":"A-1"})',
+    });
+
+    // no-tool-call: string passes when specific tool not called
+    expect(await check({ 'no-tool-call': 'cancel_order' }, withCall, [withCall])).toMatchObject({
+      pass: true,
+      reason: 'the turn didn\'t call "cancel_order"',
+    });
+    expect(await check({ 'no-tool-call': 'lookup_order' }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'the turn called "lookup_order" (it called lookup_order({"id":"A-1"}))',
+    });
+    expect(await check({ 'no-tool-call': 'lookup_order' }, turn, [turn])).toMatchObject({
+      pass: true,
+      reason: 'the turn didn\'t call "lookup_order"',
+    });
+  });
+
+  it('tool assertions work with negation (not- prefix)', async () => {
+    const withCall: TurnResult = {
+      ...turn,
+      toolCalls: [{ name: 'lookup_order', input: { id: 'A-1' } }],
+    };
+
+    // not-calls-tool
+    expect(await check({ 'not-calls-tool': 'lookup_order' }, turn, [turn])).toMatchObject({
+      pass: true,
+    });
+    expect(await check({ 'not-calls-tool': 'lookup_order' }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'expected not: the turn called "lookup_order"',
+    });
+    expect(await check({ 'not-calls-tool': { name: 'lookup_order', args: { id: 'A-1' } } }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'expected not: the turn called "lookup_order" with {"id":"A-1"}',
+    });
+    expect(await check({ 'not-calls-tool': { name: 'lookup_order', args: { id: 'A-2' } } }, withCall, [withCall])).toMatchObject({
+      pass: true,
+    });
+
+    // not-no-tool-call
+    expect(await check({ 'not-no-tool-call': true }, withCall, [withCall])).toMatchObject({
+      pass: true,
+      reason: 'the turn called lookup_order({"id":"A-1"})',
+    });
+    expect(await check({ 'not-no-tool-call': true }, turn, [turn])).toMatchObject({
+      pass: false,
+      reason: 'expected not: the turn called no tools',
+    });
+    expect(await check({ 'not-no-tool-call': 'lookup_order' }, withCall, [withCall])).toMatchObject({
+      pass: true,
+    });
+    expect(await check({ 'not-no-tool-call': 'cancel_order' }, withCall, [withCall])).toMatchObject({
+      pass: false,
+      reason: 'expected not: the turn didn\'t call "cancel_order"',
+    });
+  });
+
+  it('tool assertions reject invalid values with clear errors', async () => {
+    for (const value of [123, false, true, null, [], {}, { name: 123 }, { name: '' }, { args: {} }, { name: 't', args: 123 }, { name: 't', args: [] }, { name: 't', extra: 1 }]) {
+      expect(await check({ 'calls-tool': value }, turn, [turn])).toMatchObject({
+        pass: false,
+        reason: 'calls-tool takes a tool name, or { name, args }',
+      });
+      // not- on invalid value still fails with the same error
+      expect(await check({ 'not-calls-tool': value }, turn, [turn])).toMatchObject({
+        pass: false,
+        reason: 'calls-tool takes a tool name, or { name, args }',
+      });
+    }
+
+    for (const value of [false, 123, null, [], {}, '']) {
+      expect(await check({ 'no-tool-call': value }, turn, [turn])).toMatchObject({
+        pass: false,
+        reason: 'no-tool-call takes true, or a tool name',
+      });
+      // not- on invalid value still fails with the same error
+      expect(await check({ 'not-no-tool-call': value }, turn, [turn])).toMatchObject({
+        pass: false,
+        reason: 'no-tool-call takes true, or a tool name',
+      });
     }
   });
 

@@ -1,5 +1,52 @@
 # @chatcops/core
 
+## 1.0.0-rc.0
+
+### Major Changes
+
+- 3f6fd66: Removes the APIs that 0.6 to 0.8 deprecated. Each one now fails at startup with a message naming the replacement, and [Upgrading to 1.0](https://chat.codercops.com/getting-started/upgrading-to-1/) has a step for each.
+
+  - Server: `cors` (use `allowedOrigins`), `conversationStore` (use `storage: { conversations }`), `i18n` (ignored since 0.6), and the `RateLimiter` and `RateLimitConfig` exports (use `createRateLimiter` from `@chatcops/core`). Webhook bodies no longer repeat `event` and `timestamp`: read `type` and `created`.
+  - Core: analytics stats drop `leadsCapture` (use `leadsCaptured`), and the `noun:verb` event names are no longer read as `noun.verb` ones or repeated in `eventCounts`. Events a store saved under them still count.
+  - Core: the Claude, OpenAI and Gemini providers no longer have `chat()` and `chatSync()`; use `runTurn()`. On `AIProvider`, `chat()` is optional and `chatSync()` is gone, so a custom provider needs `step()` or `chat()`.
+  - Widget: `persistHistory` (use `persistence: 'none'`). Setting it throws, so a site that asked for nothing to be saved never starts saving.
+
+## 0.6.0
+
+### Minor Changes
+
+- 897f8e3: Analytics events are named `noun.verb` now: `conversation.started`, `message.sent`, `message.received` and `lead.captured`, also exported as `ANALYTICS_EVENTS`. The old `noun:verb` names keep working until 1.0. `track()` and `getEvents()` read them as the new ones, stats count events a store saved under either, and `eventCounts` has both keys, so the numbers carry on across the upgrade. Stats gain `leadsCaptured`. `leadsCapture`, the same number, is deprecated. A custom `EventSink` now receives the new names. Webhook event names don't change.
+- 304f1df: Add a Cloudflare Workers AI reranker for knowledge retrieval.
+- 3ee5fdc: Add `cohereReranker` for reranking retrieved chunks with Cohere's Rerank API.
+- b0bd38d: Answers now cite the pages they came from. Chunks from knowledge sources with `retrieve` are passed to the turn as `sources`, and each page the reply cites becomes a `source` part (once per page), streamed after the text and saved with the reply. Claude gets the chunks as `search_result` blocks and cites them natively; other providers get a numbered `<sources>` block and cite with `[n]`, and numbers that match no source are removed from the text. New in core: `sources` on `runTurn` and provider step params, `citations: 'native'` on providers, a `source` provider event, and `CitationParser`/`parseCitations`/`sourcePart`.
+- 8d6223d: Add `geminiEmbedder` for embeddings via Google's Gemini batchEmbedContents API.
+- e22060d: A `Logger` for everything ChatCops writes: `logger` in the server config gets startup notes, refused requests and every error the server handles instead of throwing, each with a stable `event` name (`provider_error`, `tool_error`, `webhook_failed`, `origin_refused`, …). The default `consoleLogger()` prints the same `[chatcops] …` lines as before; `jsonLogger()` writes one JSON object per line, and any object with `debug`/`info`/`warn`/`error` works. Tools get the logger as `context.logger`, and `runTurn`, providers (`ProviderConfig.logger`), `ConversationManager` and `BufferedEventSink` take one too.
+
+  **Tool errors:** when a tool throws, the model now sees only `Tool failed: <name>`, and the full error is logged as `tool_error`. Before, the thrown message went to the model, which could repeat a database error or a connection string to the visitor. Return `{ success: false, message }` to tell the model something it can pass on. Timeouts and cancelled replies keep their messages.
+
+  Console lines for errors that come with an error object no longer end in a colon (`[chatcops] Provider error` and the error), and `describeBudgets` and `describeSecurity` no longer start with `[chatcops] `, since the logger adds it.
+
+- 9d36629: Retrieval building blocks. `KnowledgeSource` has an optional `retrieve(query)` that returns chunks with their source page. When a source has it, the server calls it with the conversation so far, for follow-up questions, and gives the model every source's chunks as one numbered block, fenced as reference material that never contains instructions. Sources with only `getContext` work as before.
+
+  New in core: the `Embedder`, `Retriever`, `RetrievedChunk` and `RetrievalQuery` types, `openaiEmbedder` (fetch only, `text-embedding-3-small` at 1024 dimensions by default, with retries on rate limits), `retrieverKnowledge` and `formatSources`.
+
+- d890cbe: Ready-made retrievers: `vectorRetriever` searches a vector store by meaning, and `hybridRetriever` also searches by words and merges both by rank (reciprocal rank fusion, k = 60), which finds product names and codes that meaning alone misses. Both take `candidates` and an optional `reranker` (new `Reranker` interface), and refuse an embedder whose vectors don't match the store's size. A short or follow-up question is searched together with the visitor's previous one (`retrievalQueryText`). `reciprocalRankFusion` is exported too.
+- 100475b: New `VectorStore` interface (`vectors` on `ChatCopsStorage`) for embedded chunks of a site's pages, with `upsert`, `query` (cosine similarity), an optional `keywordQuery` and `deleteBySource`. `memoryVectors({ dimensions })` keeps them in memory and does BM25 keyword search with `Intl.Segmenter`, so Japanese and Chinese work. `runStorageConformance` checks `vectors` when a store has them. The server doesn't search vectors yet.
+- 7ecd228: Add `voyageEmbedder`, which turns text into vectors with Voyage AI's embeddings API. It embeds documents and search queries the way Voyage recommends, batches requests, and retries rate limits and server errors.
+- b66fd9f: Add `voyageReranker` for reranking retrieved chunks with Voyage AI's Reranker API.
+- 86085c0: `ChatCops.setUser({ name, email, token })` and `ChatCops.setContext(data)`. `setUser` sets the signed-in visitor's identity token for the server, and sends `name` and `email` as visitor details with the first message of each conversation; switching users or `setUser(null)` clears the chat. `setContext` adds details for the next messages, such as `{ plan: 'Team' }`, sent as the new `pageContext.data` (at most 20 string fields), which the server shows the model as page details that aren't verified. With the script tag loader both are kept until the chat loads, without loading it early or touching storage.
+
+  Visitor details are now sent again with the first message of a new conversation on a v1 server, which keeps them from that message.
+
+- a029c43: Add `workersAiEmbedder` for Cloudflare Workers AI embeddings using the native `env.AI` binding (`@cf/baai/bge-m3` at 1024 dimensions by default), with automatic batching up to 100 texts and response validation.
+
+### Patch Changes
+
+- bd6f3c8: The Claude provider now uses `@anthropic-ai/sdk` 1.x, which talks to Claude's API version 2026-10-21. That version removed `temperature`, so it's never sent to Claude: a configured `temperature` logs one warning and is left out. Claude 4.7 and later, including the default `claude-haiku-5-5`, already ignored it. On older Claude models a lowered `temperature` no longer has an effect; use `effort` instead.
+- 4e86624: Support Japanese and Chinese in TextKnowledgeSource and FAQKnowledgeSource using word segmentation.
+- a714a12: `openaiEmbedder` now keeps `batchSize` between 1 and 2048 (what OpenAI accepts), so a value of 0 no longer loops forever. The OpenAI, Voyage and Gemini embedders share one implementation of retries and batching, with no change in behavior.
+- f535508: Keyword search in the pgvector store now matches pages with any of the question's words, ranked by how well they match, instead of only pages with all of them. The storage conformance suite checks this for every store.
+
 ## 0.5.0
 
 ### Minor Changes

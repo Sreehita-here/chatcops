@@ -69,6 +69,16 @@ describe('configFromScript', () => {
     expect(config?.historyTtlDays).toBeUndefined();
   });
 
+  it.each([
+    ['3000', 3000],
+    ['3s', undefined],
+    ['1.5', undefined],
+    ['', undefined],
+  ])('reads data-welcome-bubble-delay="%s" as %s', (welcomeBubbleDelay, delay) => {
+    const config = configFromScript(script({ apiUrl: '/api/chat', welcomeBubble: 'Need help?', welcomeBubbleDelay }));
+    expect(config?.welcomeBubble).toEqual({ text: 'Need help?', delay });
+  });
+
   it('turns the AI disclosure off with data-disclosure="false"', () => {
     expect(configFromScript(script({ apiUrl: '/api/chat', disclosure: 'false' }))?.disclosure).toBe(false);
     expect(configFromScript(script({ apiUrl: '/api/chat', disclosure: 'yes' }))?.disclosure).toEqual({ text: undefined, learnMoreUrl: undefined });
@@ -77,5 +87,11 @@ describe('configFromScript', () => {
   it('leaves out what the tag does not set', () => {
     const config = configFromScript(script({ apiUrl: '/api/chat' }));
     expect(config).toMatchObject({ apiUrl: '/api/chat', mode: undefined, container: undefined, welcomeBubble: undefined, autoOpen: undefined });
+  });
+
+  it('reads the nonce property from a script tag', () => {
+    const tag = script({ apiUrl: '/api/chat' });
+    tag.nonce = 'request-nonce';
+    expect(configFromScript(tag)?.nonce).toBe('request-nonce');
   });
 });

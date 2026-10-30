@@ -1,5 +1,69 @@
 # @chatcops/server
 
+## 1.0.0-rc.0
+
+### Major Changes
+
+- 3f6fd66: Removes the APIs that 0.6 to 0.8 deprecated. Each one now fails at startup with a message naming the replacement, and [Upgrading to 1.0](https://chat.codercops.com/getting-started/upgrading-to-1/) has a step for each.
+
+  - Server: `cors` (use `allowedOrigins`), `conversationStore` (use `storage: { conversations }`), `i18n` (ignored since 0.6), and the `RateLimiter` and `RateLimitConfig` exports (use `createRateLimiter` from `@chatcops/core`). Webhook bodies no longer repeat `event` and `timestamp`: read `type` and `created`.
+  - Core: analytics stats drop `leadsCapture` (use `leadsCaptured`), and the `noun:verb` event names are no longer read as `noun.verb` ones or repeated in `eventCounts`. Events a store saved under them still count.
+  - Core: the Claude, OpenAI and Gemini providers no longer have `chat()` and `chatSync()`; use `runTurn()`. On `AIProvider`, `chat()` is optional and `chatSync()` is gone, so a custom provider needs `step()` or `chat()`.
+  - Widget: `persistHistory` (use `persistence: 'none'`). Setting it throws, so a site that asked for nothing to be saved never starts saving.
+
+- e28116a: Session tokens are required by default. A server without `sessionSecrets` refuses to start unless it sets `allowAnonymous: true`, so a chat can't be left open to guessed or leaked conversation ids by accident. `requireSession` is removed: `requireSession: false` is now `allowAnonymous: true` next to `sessionSecrets`, and `true` was already the default. The widget fetches tokens itself from 0.6, but it asks `<chat url>/session`, so with Express mount the handler with `app.use('/chat', ...)`, and on Vercel or Next.js add a `/session` route that re-exports the chat route. `chatcops test` runs the server in process without needing tokens. See [Upgrading to 1.0](https://chat.codercops.com/getting-started/upgrading-to-1/).
+
+### Patch Changes
+
+- 3fada9b: The 0.5 stream format, for widgets older than 0.6 and clients that don't send `protocol: 1`, stays through 1.x and goes away in 2.0. The startup note and the docs said 1.0.
+- 6e88477: `createChatHandler` now throws when `retention.conversationsDays` is 0, negative or not a finite number. Before, 0 or a negative value made `purge()` delete every conversation.
+- Updated dependencies [3f6fd66]
+  - @chatcops/core@1.0.0-rc.0
+
+## 0.7.0
+
+### Minor Changes
+
+- 897f8e3: Analytics events are named `noun.verb` now: `conversation.started`, `message.sent`, `message.received` and `lead.captured`, also exported as `ANALYTICS_EVENTS`. The old `noun:verb` names keep working until 1.0. `track()` and `getEvents()` read them as the new ones, stats count events a store saved under either, and `eventCounts` has both keys, so the numbers carry on across the upgrade. Stats gain `leadsCaptured`. `leadsCapture`, the same number, is deprecated. A custom `EventSink` now receives the new names. Webhook event names don't change.
+- b0bd38d: Answers now cite the pages they came from. Chunks from knowledge sources with `retrieve` are passed to the turn as `sources`, and each page the reply cites becomes a `source` part (once per page), streamed after the text and saved with the reply. Claude gets the chunks as `search_result` blocks and cites them natively; other providers get a numbered `<sources>` block and cite with `[n]`, and numbers that match no source are removed from the text. New in core: `sources` on `runTurn` and provider step params, `citations: 'native'` on providers, a `source` provider event, and `CitationParser`/`parseCitations`/`sourcePart`.
+- cb360ad: The types that make up a config are now exported, so a site can name them: `ThemeConfig`, `ThemeMode`, `PreChatField`, `PreChatFormConfig`, `Persistence`, `MessageStatus` and `MessageErrorType` from `@chatcops/widget`, and `TurnstileConfig` from `@chatcops/server`.
+- 31d67fb: Signed-in visitors. With `identity: { secret }` on the server, your site signs a `userToken` (an HS256 JWT with `sub`, `exp` and an optional `tier`) and the widget sends it with `/session` (`userToken` or `data-user-token`). The user id goes into the session token and is stored on the conversation, so the same user can resume it with a fresh token and nobody else can. `identity.tiers` gives a tier its own budgets.
+- e22060d: A `Logger` for everything ChatCops writes: `logger` in the server config gets startup notes, refused requests and every error the server handles instead of throwing, each with a stable `event` name (`provider_error`, `tool_error`, `webhook_failed`, `origin_refused`, …). The default `consoleLogger()` prints the same `[chatcops] …` lines as before; `jsonLogger()` writes one JSON object per line, and any object with `debug`/`info`/`warn`/`error` works. Tools get the logger as `context.logger`, and `runTurn`, providers (`ProviderConfig.logger`), `ConversationManager` and `BufferedEventSink` take one too.
+
+  **Tool errors:** when a tool throws, the model now sees only `Tool failed: <name>`, and the full error is logged as `tool_error`. Before, the thrown message went to the model, which could repeat a database error or a connection string to the visitor. Return `{ success: false, message }` to tell the model something it can pass on. Timeouts and cancelled replies keep their messages.
+
+  Console lines for errors that come with an error object no longer end in a colon (`[chatcops] Provider error` and the error), and `describeBudgets` and `describeSecurity` no longer start with `[chatcops] `, since the logger adds it.
+
+- 9d36629: Retrieval building blocks. `KnowledgeSource` has an optional `retrieve(query)` that returns chunks with their source page. When a source has it, the server calls it with the conversation so far, for follow-up questions, and gives the model every source's chunks as one numbered block, fenced as reference material that never contains instructions. Sources with only `getContext` work as before.
+
+  New in core: the `Embedder`, `Retriever`, `RetrievedChunk` and `RetrievalQuery` types, `openaiEmbedder` (fetch only, `text-embedding-3-small` at 1024 dimensions by default, with retries on rate limits), `retrieverKnowledge` and `formatSources`.
+
+- 86085c0: `ChatCops.setUser({ name, email, token })` and `ChatCops.setContext(data)`. `setUser` sets the signed-in visitor's identity token for the server, and sends `name` and `email` as visitor details with the first message of each conversation; switching users or `setUser(null)` clears the chat. `setContext` adds details for the next messages, such as `{ plan: 'Team' }`, sent as the new `pageContext.data` (at most 20 string fields), which the server shows the model as page details that aren't verified. With the script tag loader both are kept until the chat loads, without loading it early or touching storage.
+
+  Visitor details are now sent again with the first message of a new conversation on a v1 server, which keeps them from that message.
+
+### Patch Changes
+
+- 5e34537: 405 responses now include `Allow: POST, OPTIONS`.
+- Updated dependencies [897f8e3]
+- Updated dependencies [bd6f3c8]
+- Updated dependencies [304f1df]
+- Updated dependencies [3ee5fdc]
+- Updated dependencies [b0bd38d]
+- Updated dependencies [4e86624]
+- Updated dependencies [a714a12]
+- Updated dependencies [8d6223d]
+- Updated dependencies [f535508]
+- Updated dependencies [e22060d]
+- Updated dependencies [9d36629]
+- Updated dependencies [d890cbe]
+- Updated dependencies [100475b]
+- Updated dependencies [7ecd228]
+- Updated dependencies [b66fd9f]
+- Updated dependencies [86085c0]
+- Updated dependencies [a029c43]
+  - @chatcops/core@0.6.0
+
 ## 0.6.0
 
 ### Minor Changes

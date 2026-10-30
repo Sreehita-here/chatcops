@@ -23,10 +23,13 @@ export {
 export type { MessageData, MessageErrorType, MessageStatus } from './dom/messages.js';
 export type { ThemeConfig, ThemeMode } from './theme.js';
 export type { Persistence } from './storage.js';
+export type { UserToken } from './api/client.js';
 export type { WidgetLocaleStrings } from './i18n.js';
 export { parseAutoOpen } from './script-config.js';
 
 let instance: Widget | null = null;
+// Kept without an instance, so `setConsent()` can come before `init()`; like the loader's, it outlives `destroy()`.
+let consent: boolean | undefined;
 const persistentHandlers = new Map<WidgetEventType, Set<WidgetEventHandler<never>>>();
 
 const ChatCops = {
@@ -40,6 +43,7 @@ const ChatCops = {
         instance.on(event, handler as WidgetEventHandler);
       }
     }
+    if (consent !== undefined) instance.setConsent(consent);
     instance.init();
     return instance;
   },
@@ -91,6 +95,16 @@ const ChatCops = {
   /** Details the bot should know for the next messages, such as `{ plan: 'Team' }`. `null` removes them. */
   setContext(data: Record<string, string> | null): void {
     instance?.setContext(data);
+  },
+
+  /**
+   * Whether the visitor accepted functional cookies, for a chat with `waitForConsent`. `true` shows the chat;
+   * `false` closes it and removes what it saved in this browser. May come before `init()`; the last call wins.
+   * While consent is missing `sendMessage()` resolves without sending, so don't wait on a reply.
+   */
+  setConsent(value: boolean): void {
+    consent = value;
+    instance?.setConsent(value);
   },
 
   /** Changes the theme, branding or wording of the running chat. What you leave out stays as it is. */

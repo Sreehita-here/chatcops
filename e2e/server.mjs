@@ -27,7 +27,9 @@ const files = {
   '/full.html': ['fixtures/full.html', 'text/html'],
   '/theme.html': ['fixtures/theme.html', 'text/html'],
   '/prechat.html': ['fixtures/prechat.html', 'text/html'],
+  '/consent.html': ['fixtures/consent.html', 'text/html'],
   '/locale.html': ['fixtures/locale.html', 'text/html'],
+  '/csp.html': ['fixtures/csp.html', 'text/html'],
   '/locales/zz.js': ['fixtures/locales/zz.js', 'text/javascript'],
 };
 
@@ -177,6 +179,7 @@ function chatEndpoint(overrides = {}) {
     tools: [slowLookup],
     toolTimeoutMs: 30_000,
     budgets: false,
+    allowAnonymous: true,
     ...overrides,
   };
   const handler = createChatHandler(config);
@@ -187,7 +190,13 @@ function chatEndpoint(overrides = {}) {
 const endpoints = {
   '/api/chat': chatEndpoint(),
   // Session tokens on, for the session spec.
-  '/api/secure-chat': chatEndpoint({ sessionSecrets: ['an-e2e-session-secret-of-32-bytes-or-more'] }),
+  '/api/secure-chat': chatEndpoint({ sessionSecrets: ['an-e2e-session-secret-of-32-bytes-or-more'], allowAnonymous: false }),
+  // Signed-in visitors: the userToken spec signs a token with this secret.
+  '/api/identity-chat': chatEndpoint({
+    sessionSecrets: ['an-e2e-session-secret-of-32-bytes-or-more'],
+    identity: { secret: 'an-e2e-identity-secret-of-32-bytes-or-more' },
+    allowAnonymous: false,
+  }),
 };
 
 /** Runs a Fetch API handler for a Node request. */
@@ -272,7 +281,11 @@ const server = createServer(async (req, res) => {
 
     const file = files[url.pathname];
     if (file) {
-      res.writeHead(200, { 'Content-Type': file[1] });
+      const headers = { 'Content-Type': file[1] };
+      if (url.pathname === '/csp.html') {
+        headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'nonce-chatcops-e2e'; style-src 'nonce-chatcops-e2e'; connect-src 'self'; img-src 'self' data:";
+      }
+      res.writeHead(200, headers);
       let content = await readFile(join(here, file[0]), 'utf8');
       content = content.replaceAll('__E2E_API_PORT__', String(apiPort));
       return res.end(content);

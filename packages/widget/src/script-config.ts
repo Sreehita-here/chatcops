@@ -18,6 +18,7 @@ export function configFromScript(script: HTMLScriptElement): WidgetConfig | unde
 
   return {
     apiUrl,
+    nonce: script.nonce || undefined,
     turnstileSiteKey: script.dataset.turnstileSiteKey,
     userToken: script.dataset.userToken,
     mode: mode || undefined,
@@ -41,7 +42,7 @@ export function configFromScript(script: HTMLScriptElement): WidgetConfig | unde
     welcomeBubble: script.dataset.welcomeBubble
       ? {
           text: script.dataset.welcomeBubble,
-          delay: script.dataset.welcomeBubbleDelay ? parseInt(script.dataset.welcomeBubbleDelay, 10) : undefined,
+          delay: /^\d+$/.test(script.dataset.welcomeBubbleDelay ?? '') ? Number(script.dataset.welcomeBubbleDelay) : undefined,
         }
       : undefined,
     autoOpen: parseAutoOpen(script.dataset.autoOpen),
@@ -54,5 +55,6 @@ export function configFromScript(script: HTMLScriptElement): WidgetConfig | unde
     dir: (['ltr', 'rtl', 'auto'] as const).find((dir) => dir === script.dataset.dir),
     persistence: (['local', 'session', 'none'] as const).find((mode) => mode === script.dataset.persistence),
     historyTtlDays: /^\d+$/.test(script.dataset.historyTtlDays ?? '') ? Number(script.dataset.historyTtlDays) : undefined,
+    waitForConsent: script.dataset.waitForConsent === undefined ? undefined : script.dataset.waitForConsent !== 'false',
   };
 }

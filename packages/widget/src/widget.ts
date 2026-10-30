@@ -1,8 +1,8 @@
 import { createShadowRoot, destroyShadowRoot } from './dom/shadow.js';
 import { FAB } from './dom/fab.js';
 import { Panel, type PanelLabels } from './dom/panel.js';
-import { WelcomeBubble } from './dom/bubble.js';
-import { ChatClient } from './api/client.js';
+import { BUBBLE_SHOWN_KEY, WelcomeBubble } from './dom/bubble.js';
+import { ChatClient, type UserToken } from './api/client.js';
 import { ConversationStorage, type Persistence } from './storage.js';
 import { claimNamespace, type ClaimedNamespace } from './namespace.js';
 import { applyTheme, type ThemeConfig } from './theme.js';
@@ -41,6 +41,8 @@ export interface PreChatFormConfig {
 
 export interface WidgetConfig {
   apiUrl: string;
+  /** CSP nonce applied to the widget's injected style elements. */
+  nonce?: string;
   /** Request/stream inactivity timeout in milliseconds. Defaults to 30000. */
   timeout?: number;
   /**
@@ -51,8 +53,11 @@ export interface WidgetConfig {
   /**
    * For a visitor your site has signed in: an HS256 JWT your server signs
    * with the chat server's `identity.secret` (`sub`, `exp`, optional `tier`).
+   * Give a function (it may be async) to get a fresh token each time the
+   * widget asks for a session; if it fails or takes over 5 seconds, the
+   * session starts without the visitor.
    */
-  userToken?: string;
+  userToken?: UserToken;
   mode?: 'popup' | 'inline';
   /**
    * Names this widget's saved conversation. Set a different one on each widget
@@ -90,8 +95,6 @@ export interface WidgetConfig {
   persistence?: Persistence;
   /** Saved conversations older than this are dropped. Default 30 days. */
   historyTtlDays?: number;
-  /** @deprecated Use `persistence: 'none'`. `false` is read as that. */
-  persistHistory?: boolean;
   maxMessages?: number;
   pageContext?: boolean;
   autoOpen?: boolean | number;
@@ -105,6 +108,14 @@ export interface WidgetConfig {
   onError?: (error: Error) => void;
   onLeadCaptured?: (leadData?: Record<string, unknown>) => void;
   onPreChatSubmit?: (data: Record<string, string>) => void;
+  /**
+   * Holds the chat until `setConsent(true)`: it shows a notice instead of the
+   * conversation, and reads and writes no storage and calls no API meanwhile.
+   * Default false.
+   */
+  waitForConsent?: boolean;
+  /** Called by the notice's button, to open the site's own consent banner. Without it the button is left out. */
+  onConsentRequest?: () => void;
 }
 
 /** What `update()` can change on a running chat. */
@@ -190,22 +201,29 @@ export class Widget {
   private autoOpenTimer?: ReturnType<typeof setTimeout>;
   private unreadReplies = 0;
   private savedOverflow?: { value: string; priority: string };
+  /** The visitor accepted functional cookies, or the site doesn't wait for them. */
+  private consented: boolean;
+  private consentEl?: HTMLElement;
 
   get isInline(): boolean {
     return this.config.mode === 'inline';
   }
 
   constructor(config: WidgetConfig) {
+    // Checked before anything is claimed. Ignoring `persistHistory: false`
+    // would save conversations on a site that asked for none.
+    if ('persistHistory' in config) throw new Error("ChatCops: persistHistory was removed in 1.0. Use persistence: 'none'.");
     this.config = config;
     this.namespace = claimNamespace(
       config.siteId,
       config.mode ?? 'popup',
       () => !this.destroyed && (!this.mounted || this.shadow.host.isConnected)
     );
-    const persistence = config.persistence ?? (config.persistHistory === false ? 'none' : 'local');
+    const persistence = config.persistence ?? 'local';
     this.storage = new ConversationStorage(this.namespace.siteId, persistence, config.historyTtlDays);
-    this.client = new ChatClient({ ...config, store: this.storage.store });
     this.locale = getWidgetLocale(config.locale ?? 'en', config.strings);
+    this.consented = !config.waitForConsent;
+    this.client = new ChatClient({ ...config, store: this.storage.store });
   }
 
   private resolveContainer(): HTMLElement {
@@ -226,9 +244,9 @@ export class Widget {
     prefetch(this.config);
     if (this.isInline) {
       this.containerEl = this.resolveContainer();
-      this.shadow = createShadowRoot(this.containerEl, { dir: this.config.dir, locale: this.config.locale });
+      this.shadow = createShadowRoot(this.containerEl, { dir: this.config.dir, locale: this.config.locale, nonce: this.config.nonce });
     } else {
-      this.shadow = createShadowRoot(undefined, { dir: this.config.dir, locale: this.config.locale });
+      this.shadow = createShadowRoot(undefined, { dir: this.config.dir, locale: this.config.locale, nonce: this.config.nonce });
     }
     this.mounted = true;
 
@@ -278,18 +296,7 @@ export class Widget {
     // conversation when it's first opened, so nothing touches storage before.
     if (this.isInline) this.hydrate();
 
-    // Welcome bubble — popup mode only
-    if (!this.isInline && this.config.welcomeBubble) {
-      this.bubble = new WelcomeBubble(this.shadow, {
-        text: this.config.welcomeBubble.text,
-        delay: this.config.welcomeBubble.delay,
-        showOnce: this.config.welcomeBubble.showOnce ?? true,
-        store: this.storage.store,
-        position,
-        dismissLabel: this.locale.dismissBubble,
-        onClick: () => this.open(),
-      });
-    }
+    if (this.consented) this.createBubble();
 
     // Inline mode — show panel immediately
     if (this.isInline) {
@@ -303,9 +310,78 @@ export class Widget {
     }
   }
 
+  /** The welcome bubble (popup mode), once storage may be used for its "shown" flag. */
+  private createBubble(): void {
+    if (this.isInline || this.bubble || !this.config.welcomeBubble) return;
+    this.bubble = new WelcomeBubble(this.shadow, {
+      text: this.config.welcomeBubble.text,
+      delay: this.config.welcomeBubble.delay,
+      showOnce: this.config.welcomeBubble.showOnce ?? true,
+      store: this.storage.store,
+      position: this.config.theme?.position ?? 'bottom-right',
+      dismissLabel: this.locale.dismissBubble,
+      onClick: () => this.open(),
+    });
+  }
+
+  /**
+   * The visitor's answer on functional cookies. Until `true`, a widget with `waitForConsent`
+   * shows a notice and touches no storage or API. `false` closes the chat and removes what it
+   * saved (the conversation, the session token and the bubble's flag).
+   */
+  setConsent(consent: boolean): void {
+    if (consent === this.consented) return;
+    // Not mounted yet: nothing has been read or saved, and init() follows the flag.
+    if (this.destroyed || !this.mounted) {
+      this.consented = consent;
+      return;
+    }
+    if (consent) {
+      this.consented = true;
+      this.consentEl?.remove();
+      this.panel.setBodyVisible(true);
+      this.createBubble();
+      if (this.isInline || this.panel.isVisible) this.hydrate();
+      return;
+    }
+    // Cleared while the gate is still open; after this nothing is read or written.
+    this.reset(true, false);
+    this.hydrated = false;
+    this.storage.store.remove(BUBBLE_SHOWN_KEY);
+    this.client.forgetSession();
+    this.consented = false;
+    this.bubble?.destroy();
+    this.bubble = undefined;
+    if (this.isInline) this.hydrate();
+    else if (this.panel.isVisible) this.close();
+  }
+
+  private showConsentNotice(): void {
+    if (this.consentEl?.isConnected) return;
+    this.panel.setBodyVisible(false);
+    const notice = document.createElement('div');
+    notice.className = 'cc-consent';
+    notice.textContent = this.locale.consentNotice;
+    const { onConsentRequest } = this.config;
+    if (onConsentRequest) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cc-consent-btn';
+      button.textContent = this.locale.consentButton;
+      button.addEventListener('click', () => onConsentRequest());
+      notice.appendChild(button);
+    }
+    this.panel.messagesContainer.appendChild(notice);
+    this.consentEl = notice;
+  }
+
   /** Reads the saved conversation and shows it, or the pre-chat form. Runs once. */
   private hydrate(): void {
     if (this.hydrated) return;
+    if (!this.consented) {
+      this.showConsentNotice();
+      return;
+    }
     this.hydrated = true;
     const saved = this.storage.load();
     if (saved) {
@@ -388,7 +464,9 @@ export class Widget {
     this.reset(true);
   }
 
-  private reset(forget: boolean): void {
+  private reset(forget: boolean, show = true): void {
+    // Waiting for consent: there is nothing to reset, and the notice stays up.
+    if (!this.consented) return;
     this.generation++;
     this.abortController?.abort();
     this.abortController = undefined;
@@ -407,6 +485,7 @@ export class Widget {
     this.preChatFormEl = undefined;
     this.panel.messages.clear();
     this.panel.input.setDisabled(false);
+    if (!show) return;
     if (this.config.preChatForm?.enabled && !this.preChatDone) this.showPreChatForm();
     else this.showChatView();
     if (!forget) this.saveHistory();
@@ -423,7 +502,8 @@ export class Widget {
     const previous = this.client.identity;
     const token = user?.token;
     if (previous !== undefined && previous !== token) this.clear();
-    this.client.setUserToken(token);
+    // While waiting, the stored session token is left alone: setUserToken() drops the one in memory.
+    this.client.setUserToken(token, this.consented);
     if (!user) return;
     const details = Object.fromEntries(
       Object.entries({ name: user.name, email: user.email }).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '')
@@ -577,8 +657,7 @@ export class Widget {
 
   private showPreChatForm(): void {
     const formConfig = this.config.preChatForm!;
-    this.panel.hideMessages();
-    this.panel.input.setVisible(false);
+    this.panel.setBodyVisible(false);
 
     loadPreChatForm().then(
       ({ PreChatForm }) => {
@@ -590,6 +669,7 @@ export class Widget {
           fields: formConfig.fields,
           submitLabel: formConfig.submitLabel ?? this.locale.preChatSubmit,
           locale: this.locale,
+          nonce: this.config.nonce,
           onSubmit: (data) => this.handlePreChatSubmit(data),
         });
       },
@@ -598,8 +678,7 @@ export class Widget {
         console.error('[chatcops] The pre-chat form could not load:', error instanceof Error ? error.message : error);
         if (this.destroyed || this.preChatDone) return;
         this.preChatDone = true;
-        this.panel.showMessages();
-        this.panel.input.setVisible(true);
+        this.panel.setBodyVisible(true);
         this.showChatView();
       }
     );
@@ -615,8 +694,7 @@ export class Widget {
     this.preChatFormEl?.destroy();
     this.preChatFormEl = undefined;
 
-    this.panel.showMessages();
-    this.panel.input.setVisible(true);
+    this.panel.setBodyVisible(true);
 
     this.showChatView();
 
@@ -656,7 +734,7 @@ export class Widget {
   }
 
   private async handleSend(text: string): Promise<void> {
-    if (this.isStreaming) return;
+    if (this.isStreaming || !this.consented) return;
     // A message sent before the chat was opened still joins the saved conversation.
     this.hydrate();
 

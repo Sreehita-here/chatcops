@@ -185,12 +185,10 @@ export class Panel {
     return this.messages.addMessage(msg);
   }
 
-  hideMessages(): void {
-    this.messages.setVisible(false);
-  }
-
-  showMessages(): void {
-    this.messages.setVisible(true);
+  /** The conversation and the input together; the pre-chat form and the consent notice replace them. */
+  setBodyVisible(visible: boolean): void {
+    this.messages.setVisible(visible);
+    this.input.setVisible(visible);
   }
 
   destroy(): void {

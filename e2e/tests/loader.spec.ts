@@ -25,6 +25,33 @@ test('the panel downloads on hover, not on page load, and opens on click', async
   expect(panelRequests(requested)).toHaveLength(1);
 });
 
+test('the script nonce allows launcher, panel and lazy pre-chat styles under CSP', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { cspViolations: string[] }).cspViolations = [];
+    document.addEventListener('securitypolicyviolation', (event) => {
+      (window as unknown as { cspViolations: string[] }).cspViolations.push(event.violatedDirective);
+    });
+  });
+  await page.goto('/csp.html');
+  await expect(page.locator(fab)).toBeVisible();
+  expect(await page.locator('#chatcops-root').evaluate((host) => host.shadowRoot?.querySelector('style')?.nonce)).toBe('chatcops-e2e');
+
+  await page.evaluate(() => {
+    (window as unknown as { ChatCops: { init(config: object): void } }).ChatCops.init({
+      apiUrl: '/api/chat',
+      nonce: 'chatcops-e2e',
+      preChatForm: { enabled: true, fields: [{ name: 'name', label: 'Name', type: 'text' }] },
+    });
+  });
+  await page.locator(fab).click();
+  await expect(page.locator('.cc-prechat')).toBeVisible();
+  const nonces = await page.locator('#chatcops-root').evaluate((host) =>
+    Array.from(host.shadowRoot?.querySelectorAll('style') ?? [], (style) => style.nonce)
+  );
+  expect(nonces).toEqual(['chatcops-e2e', 'chatcops-e2e']);
+  expect(await page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([]);
+});
+
 for (const [build, path] of [['loader', '/'], ['single-file build', '/full.html']] as const) {
   test(`nothing reads or writes storage before the visitor interacts (${build})`, async ({ page }) => {
     await countStorageCalls(page);
@@ -39,6 +66,36 @@ for (const [build, path] of [['loader', '/'], ['single-file build', '/full.html'
     expect(await storageCalls(page)).toContain('getItem');
   });
 }
+
+test('with data-wait-for-consent, opening the chat touches no storage and no API until setConsent(true)', async ({ page }) => {
+  await countStorageCalls(page);
+  const apiCalls: string[] = [];
+  page.on('request', (request) => new URL(request.url()).pathname === '/api/chat' && apiCalls.push(request.method()));
+  await page.goto('/consent.html');
+  await page.locator(fab).click();
+  await expect(page.locator('.cc-panel')).toHaveClass(/cc-visible/);
+  await expect(page.locator('.cc-consent')).toContainText('Chat is available once you accept functional cookies.');
+  await expect(page.locator('.cc-message')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(await storageCalls(page)).toEqual([]);
+  expect(apiCalls).toEqual([]);
+
+  await page.locator('#accept').click();
+  await expect(page.locator('.cc-consent')).toHaveCount(0);
+  await expect(page.locator('.cc-message-assistant')).toHaveCount(1);
+  expect(await storageCalls(page)).toContain('getItem');
+
+  await page.locator('.cc-input').fill('Hi there');
+  await page.locator('.cc-send-btn').click();
+  await expect(page.locator('.cc-message-assistant').last()).toContainText('Hello from the test server.');
+  expect(await page.evaluate(() => localStorage.getItem('chatcops_conversation'))).toContain('Hi there');
+
+  await page.locator('#reject').click();
+  await expect(page.locator('.cc-panel')).not.toHaveClass(/cc-visible/);
+  expect(await page.evaluate(() => localStorage.getItem('chatcops_conversation'))).toBeNull();
+  await page.locator(fab).click();
+  await expect(page.locator('.cc-consent')).toBeVisible();
+});
 
 test('a conversation comes back after a reload, once the chat is opened', async ({ page }) => {
   await page.goto('/');

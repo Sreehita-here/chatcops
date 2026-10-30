@@ -34,6 +34,8 @@ export interface WidgetLocaleStrings {
   sourcesLabel: string;
   disclosure: string;
   disclosureLearnMore: string;
+  consentNotice: string;
+  consentButton: string;
 }
 
 const en: WidgetLocaleStrings = {
@@ -71,6 +73,8 @@ const en: WidgetLocaleStrings = {
   sourcesLabel: 'Sources',
   disclosure: "You're chatting with an AI assistant. It can make mistakes.",
   disclosureLearnMore: 'Learn more',
+  consentNotice: 'Chat is available once you accept functional cookies.',
+  consentButton: 'Cookie settings',
 };
 
 const locales: Record<string, WidgetLocaleStrings> = { en };

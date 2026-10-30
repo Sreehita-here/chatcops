@@ -210,7 +210,7 @@ ANTHROPIC_API_KEY=sk-... npx tsx src/examples/express-server.ts
 
 `npx` downloads `tsx` the first time.
 
-The widget has a size budget, gzipped: 5 kB for the script tag loader (`dist/chatcops.min.js`), 17 kB for the chat panel it loads when the chat opens (`dist/chatcops.panel.js`), 2 kB for the pre-chat form chunk, 19 kB for the single-file build (`dist/chatcops.full.min.js`) and 30 kB for the unminified ESM build. CI checks them with `pnpm size` after a build (limits in `.size-limit.json`).
+The widget has a size budget, gzipped: 5 kB for the script tag loader (`dist/chatcops.min.js`), 18 kB for the chat panel it loads when the chat opens (`dist/chatcops.panel.js`), 2 kB for the pre-chat form chunk, 20 kB for the single-file build (`dist/chatcops.full.min.js`) and 30 kB for the unminified ESM build. CI checks them with `pnpm size` after a build (limits in `.size-limit.json`). To save bytes, the minifier renames the private class members listed in `packages/widget/mangle.ts`. A name can go on that list only if the code touches it through `this` and nowhere else, which `tests/mangle.test.ts` checks. A config field, a request body key or a DOM property renamed there would break only the CDN build.
 
 ### Browser tests
 
@@ -224,7 +224,9 @@ pnpm e2e
 
 With Google Chrome installed you can skip the Chromium download and run `E2E_CHANNEL=chrome pnpm e2e`.
 
-They cover starting from the script tag, streaming, Escape and the tab order, the phone layout, a reply that fails or is cut off, a slow tool kept alive by pings, session tokens, and a chat API on another origin. `e2e/tests/states.spec.ts` puts the widget in each of its states (launcher, unread, welcome bubble, suggestions, pre-chat form, streaming, sources, errors, rate limit, offline, conversation limit, phone) in light, dark and right-to-left, and checks each one with axe against WCAG 2.2 AA. When you add a state, add it there too. CI runs them all in the `e2e` job. Add a test there when you change how the widget behaves in a browser.
+They cover starting from the script tag, streaming, Escape and the tab order, the phone layout, a reply that fails or is cut off, a slow tool kept alive by pings, session tokens, and a chat API on another origin. `e2e/tests/states.spec.ts` puts the widget in each of its states (launcher, unread, welcome bubble, suggestions, pre-chat form, streaming, sources, errors, rate limit, offline, conversation limit, phone) in light, dark and right-to-left, and checks each one with axe against WCAG 2.2 AA. When you add a state, add it there too. CI runs them all in the `e2e` job.
+
+`e2e/tests/visual.spec.ts` compares screenshots of the main states, in light, dark and right-to-left, with the baselines in `e2e/screenshots/`. Fonts render differently on every OS, so the baselines are made on CI's Linux Chromium and the spec skips anywhere else, your machine included. When you change how the widget looks, a maintainer runs the "Update screenshots" workflow (Actions tab, Run workflow) on your branch. It commits the new images there. Look at them in the PR's Files tab: the diff is the review. GitHub doesn't run CI for a commit a workflow pushes, so the workflow starts CI on the branch itself. That run is under Actions, not on the PR. Check that it passed before merging. For a PR from a fork, which the workflow can't push to, the maintainer updates the images after merging. Run on `dev`, the workflow opens a PR with them, and that PR's CI waits for a maintainer to approve the run. Add a test there when you change how the widget behaves in a browser.
 
 ## Adding a new AI provider
 

@@ -36,6 +36,12 @@ export interface ChatCopsLoader {
   setContext(data: Record<string, string> | null): void;
   /** Changes the theme, branding or wording of the chat. What you leave out stays as it is. Kept until the chat loads. */
   update(changes: WidgetUpdate): void;
+  /**
+   * Tells the chat whether the visitor accepted functional cookies. Until `true`, a chat with
+   * `waitForConsent` shows a notice and never touches storage or the API. `false` closes the
+   * chat and removes what it saved. Works before `init()` and before the chat loads.
+   */
+  setConsent(consent: boolean): void;
   /** The widget's version. */
   readonly version: string;
 }
@@ -103,6 +109,8 @@ export function createLoader(
   // so a signed-in page doesn't load the chat early.
   let user: Parameters<ChatCopsLoader['setUser']>[0] | undefined;
   let context: Record<string, string> | null | undefined;
+  // setConsent() before the chat loads, or before init(): kept across init() like the user.
+  let consent: boolean | undefined;
   // update() calls before the chat loads, for this init() only.
   let updates: WidgetUpdate[] = [];
   const directionOf = (current: WidgetConfig) => current.dir ?? (current.locale ? registered.get(current.locale)?.dir : undefined);
@@ -154,6 +162,7 @@ export function createLoader(
         // Swapped in one task, so the page never paints without a button.
         launcher?.remove();
         launcher = button = undefined;
+        if (consent !== undefined) next.setConsent(consent);
         next.init();
         if (user !== undefined) next.setUser(user);
         if (context !== undefined) next.setContext(context);
@@ -185,6 +194,7 @@ export function createLoader(
     document.body.appendChild(launcher);
     const shadow = launcher.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
+    if (current.nonce) style.nonce = current.nonce;
     style.textContent = launcherStyles;
     shadow.appendChild(style);
     if (current.theme) applyTheme(shadow, current.theme);
@@ -265,6 +275,11 @@ export function createLoader(
     setContext(next) {
       context = next;
       widget?.setContext(next);
+    },
+
+    setConsent(next) {
+      consent = next;
+      widget?.setConsent(next);
     },
 
     update(changes) {

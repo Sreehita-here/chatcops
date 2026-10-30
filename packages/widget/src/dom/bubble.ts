@@ -11,7 +11,7 @@ export interface BubbleOptions {
   onClick: () => void;
 }
 
-const BUBBLE_SHOWN_KEY = 'chatcops_bubble_shown';
+export const BUBBLE_SHOWN_KEY = 'chatcops_bubble_shown';
 
 export class WelcomeBubble {
   private el: HTMLDivElement;

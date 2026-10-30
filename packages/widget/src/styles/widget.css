@@ -218,6 +218,17 @@
   text-decoration: underline;
 }
 
+.cc-consent {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: var(--cc-text-secondary);
+}
+
+.cc-consent-btn {
+  margin-top: 12px;
+}
+
 .cc-message-error-note {
   margin-top: 6px;
   font-size: 12px;
@@ -279,6 +290,7 @@
   align-items: center;
 }
 
+.cc-consent-btn,
 .cc-message-retry,
 .cc-message-regenerate {
   display: inline-flex;
@@ -295,6 +307,7 @@
   transition: background 0.15s, color 0.15s, opacity 0.15s;
 }
 
+.cc-consent-btn:hover,
 .cc-message-retry:hover,
 .cc-message-regenerate:hover {
   background: var(--cc-bg-input);
@@ -578,6 +591,7 @@
 
 /* Keyboard focus indicators (the launcher's are in launcher.css) */
 .cc-header-close:focus-visible,
+.cc-consent-btn:focus-visible,
 .cc-send-btn:focus-visible,
 .cc-suggestion:focus-visible,
 .cc-message-retry:focus-visible,

@@ -5,6 +5,16 @@ description: All configuration options for the ChatCops widget.
 
 The widget can be configured via `data-*` attributes on the script tag or programmatically via `ChatCops.init()`.
 
+## Content Security Policy
+
+If your site's Content Security Policy requires a nonce for inline styles, add the same per-response nonce to the widget script tag. Script-tag installs, including `chatcops.full.min.js`, read their script element's `nonce` and apply it to the launcher, chat panel, and lazy pre-chat form styles. For ESM and other programmatic `ChatCops.init()` calls, pass it as `nonce`:
+
+```typescript
+ChatCops.init({ apiUrl: '/api/chat', nonce: 'YOUR_RESPONSE_NONCE' });
+```
+
+Include that nonce in your response's `style-src` policy. Generate a fresh, unpredictable nonce for each response and use it for both the policy and widget script.
+
 ## Display Modes
 
 ChatCops supports two display modes:
@@ -19,6 +29,7 @@ ChatCops supports two display modes:
 ```html
 <script
   src="https://cdn.jsdelivr.net/npm/@chatcops/widget/dist/chatcops.min.js"
+  nonce="YOUR_RESPONSE_NONCE"
   data-api-url="https://your-api.com/chat"
   data-accent="#6366f1"
   data-text-color="#FAFAF9"
@@ -162,7 +173,32 @@ A popup doesn't read or write storage until the visitor opens it. Until then, no
 
 The pre-chat form's answers are saved with the conversation, so they expire with it too.
 
-`persistHistory` is deprecated. `persistHistory: false` still works and means `persistence: 'none'`. It goes away in 1.0.
+`persistHistory` was removed in 1.0. A config that still sets it throws, so a site that asked for nothing to be saved never starts saving conversations. Use `persistence: 'none'` instead.
+
+### Waiting for cookie consent
+
+A site under a strict consent policy can hold the chat back until the visitor accepts functional cookies. Set `waitForConsent` (or `data-wait-for-consent` on the script tag) and the launcher shows as usual, but opening the chat shows a notice instead of the conversation: "Chat is available once you accept functional cookies." While it waits, the widget reads and writes no `localStorage` or `sessionStorage`, not even to check, and it makes no request to your chat server. The welcome bubble stays hidden too, since it remembers that it was shown.
+
+```typescript
+declare const consentBanner: { open(): void };
+
+ChatCops.init({
+  apiUrl: '/api/chat',
+  waitForConsent: true,
+  // The notice's button. Open your own consent banner here. Without it, the notice has no button.
+  onConsentRequest: () => consentBanner.open(),
+});
+
+// When the visitor accepts functional cookies:
+ChatCops.setConsent(true);
+
+// If they withdraw it later:
+ChatCops.setConsent(false);
+```
+
+`setConsent(true)` replaces the notice with the normal chat: the saved conversation comes back and the session starts. A chat the visitor has closed stays closed. It works before or after `init()`, and with the script tag build also before the chat has loaded. `setConsent(false)` closes the chat and removes what the widget saved in this browser (the conversation, the session token and the welcome bubble's flag), and the notice shows again on the next open. If the visitor never gave consent in this page view, `setConsent(false)` does nothing and touches no storage. While consent is missing, `sendMessage()` resolves without sending, so don't wait on a reply.
+
+The notice's wording is `consentNotice` and `consentButton` in the [locale](/widget/i18n/), and a language that doesn't have them yet shows them in English.
 
 ### AI disclosure
 
@@ -213,9 +249,10 @@ const leadForm: PreChatFormConfig = {
 // docs-check: skip, a reference listing rather than code to run
 interface WidgetConfig {
   apiUrl: string;
+  nonce?: string;                // CSP nonce for the widget's injected styles
   timeout?: number;              // Inactivity timeout in ms, default: 30000
   turnstileSiteKey?: string;     // Cloudflare Turnstile site key, when the server has `turnstile` set
-  userToken?: string;            // Your server's signed token for a signed-in visitor (server `identity`)
+  userToken?: string | (() => string | undefined | Promise<string | undefined>); // Your server's signed token for a signed-in visitor (server `identity`), or a function that returns a fresh one
 
   // Display mode
   mode?: 'popup' | 'inline';       // Default: 'popup'
@@ -253,7 +290,8 @@ interface WidgetConfig {
   placeholder?: string;       // Input placeholder text
   persistence?: 'local' | 'session' | 'none'; // Where the chat is saved, default: 'local'
   historyTtlDays?: number;    // Drop saved chats older than this, default: 30
-  persistHistory?: boolean;   // Deprecated. false is the same as persistence: 'none'
+  waitForConsent?: boolean;   // Show a notice and use no storage or API until setConsent(true), default: false
+  onConsentRequest?: () => void; // The notice's button; leave it out to have no button
   maxMessages?: number;       // Max messages to persist, default: 50
   pageContext?: boolean;       // Send page URL/title, default: true
   autoOpen?: boolean | number; // Popup mode only. true = immediate, number = delay in ms
@@ -317,6 +355,7 @@ See the [pre-chat form guide](/widget/pre-chat-form) for field behavior, validat
 | `data-dir` | `dir` | Text direction: `'ltr'`, `'rtl'` or `'auto'` |
 | `data-persistence` | `persistence` | `'local'`, `'session'` or `'none'` |
 | `data-history-ttl-days` | `historyTtlDays` | Days a saved conversation is kept |
+| `data-wait-for-consent` | `waitForConsent` | Wait for `ChatCops.setConsent(true)` before using storage or the API. `"false"` turns it off |
 | `data-turnstile-site-key` | `turnstileSiteKey` | Cloudflare Turnstile site key, when the server checks Turnstile |
 | `data-user-token` | `userToken` | Signed token for a signed-in visitor, when the server has `identity` set |
 

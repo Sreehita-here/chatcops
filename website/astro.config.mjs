@@ -45,6 +45,9 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/codercops/chatcops' },
       ],
+      components: {
+        ThemeSelect: './src/components/ThemeToggle.astro',
+      },
       head: [
         {
           tag: 'script',
@@ -60,7 +63,7 @@ export default defineConfig({
         {
           tag: 'script',
           attrs: {
-            src: 'https://cdn.jsdelivr.net/npm/@chatcops/widget@0.4/dist/chatcops.min.js',
+            src: 'https://cdn.jsdelivr.net/npm/@chatcops/widget@0.7/dist/chatcops.min.js',
             'data-api-url': '/api/chat',
             'data-accent': '#6366f1',
             'data-brand-name': 'ChatCops AI',
@@ -107,6 +110,7 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'getting-started/quick-start' },
             { label: 'Installation', slug: 'getting-started/installation' },
             { label: 'Upgrading from 0.5', slug: 'getting-started/upgrading' },
+            { label: 'Upgrading to 1.0', slug: 'getting-started/upgrading-to-1' },
           ],
         },
         {

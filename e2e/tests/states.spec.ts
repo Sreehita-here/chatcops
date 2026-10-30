@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 
 // Every widget state in F-05's list that exists today, each checked with axe
 // against WCAG 2.2 AA in light, dark and right-to-left. States still to come:
-// S8 tool confirmation (F-08), S12 handoff (F-10), S17 waiting for consent.
+// S8 tool confirmation (F-08), S12 handoff (F-10).
 
 const fab = '.cc-fab';
 const panel = '.cc-panel';
@@ -182,6 +182,22 @@ for (const look of looks) {
       await failNextRequest(page, 429, { code: 'budget_exceeded', message: 'Limit reached', scope: 'conversation' });
       await ask(page, 'Hi');
       await expect(page.locator('.cc-message-assistant').last()).toContainText('This chat has reached its limit.');
+      await expectAccessible(page);
+    });
+
+    test('S17 waiting for consent', async ({ page }) => {
+      await start(page, look, { waitForConsent: true });
+      // A function can't be passed in from the test, so set the widget up again with one.
+      await page.evaluate((config) => {
+        const chat = (window as unknown as { ChatCops: Api }).ChatCops;
+        chat.destroy();
+        chat.init({ ...config, onConsentRequest: () => undefined });
+      }, { apiUrl: '/api/chat', waitForConsent: true, ...look.config });
+      await openChat(page);
+      await expect(page.locator('.cc-consent')).toBeVisible();
+      await expect(page.locator('.cc-consent-btn')).toBeVisible();
+      await page.locator('.cc-consent-btn').focus();
+      await expect(page.locator('.cc-consent-btn')).toBeFocused();
       await expectAccessible(page);
     });
 
