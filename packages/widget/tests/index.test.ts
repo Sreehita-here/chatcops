@@ -85,6 +85,34 @@ describe('ChatCops browser export and auto-init', () => {
         (globalChatCops.destroy as () => void)();
       }
     });
+
+    it.each([
+      ['uses the script nonce when manual init omits it', undefined, 'script-nonce'],
+      ['prefers an explicit nonce over the script nonce', 'config-nonce', 'script-nonce'],
+      ['does not add a nonce when the script has none', undefined, undefined],
+    ])('%s in the single-file build', (_description, configNonce, scriptNonce) => {
+      const container = document.createElement('div');
+      container.id = 'nonce-container';
+      document.body.appendChild(container);
+
+      const script = document.createElement('script');
+      if (scriptNonce) script.nonce = scriptNonce;
+      Object.defineProperty(document, 'currentScript', { value: script, configurable: true });
+      window.eval(bundleCode);
+      Object.defineProperty(document, 'currentScript', { value: null, configurable: true });
+
+      const api = (window as unknown as { ChatCops: typeof ChatCops }).ChatCops;
+      api.init({
+        apiUrl: 'https://api.test/chat',
+        mode: 'inline',
+        container: '#nonce-container',
+        ...(configNonce ? { nonce: configNonce } : {}),
+      });
+
+      const style = container.querySelector('#chatcops-root')?.shadowRoot?.querySelector('style');
+      expect(style?.nonce || undefined).toBe(configNonce ?? scriptNonce);
+      api.destroy();
+    });
   });
 
   describe('deferred auto-init with captured script element', () => {

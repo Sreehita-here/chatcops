@@ -7,7 +7,7 @@ The widget can be configured via `data-*` attributes on the script tag or progra
 
 ## Content Security Policy
 
-If your site's Content Security Policy requires a nonce for inline styles, add the same per-response nonce to the widget script tag. Script-tag installs, including `chatcops.full.min.js`, read their script element's `nonce` and apply it to the launcher, chat panel, and lazy pre-chat form styles. For ESM and other programmatic `ChatCops.init()` calls, pass it as `nonce`:
+If your site's Content Security Policy requires a nonce for inline styles, add the same per-response nonce to the widget script tag. Script-tag installs, including `chatcops.full.min.js`, read their script element's `nonce` and apply it to the launcher, chat panel, and lazy pre-chat form styles, including when you call `ChatCops.init()` manually. An explicit `nonce` in the config takes precedence. For ESM and other programmatic `ChatCops.init()` calls that do not run from a script tag, pass it as `nonce`:
 
 ```typescript
 ChatCops.init({ apiUrl: '/api/chat', nonce: 'YOUR_RESPONSE_NONCE' });

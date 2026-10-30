@@ -95,6 +95,7 @@ export function createLoader(
   loadPanel: () => Promise<PanelModule>,
   loadLocale: (locale: string) => Promise<LocaleModule> | undefined = () => undefined
 ): ChatCopsLoader {
+  const scriptNonce = typeof document !== 'undefined' ? document.currentScript?.nonce || undefined : undefined;
   let config: WidgetConfig | undefined;
   let widget: Widget | undefined;
   let loading: Promise<Widget | undefined> | undefined;
@@ -221,18 +222,19 @@ export function createLoader(
   const api: ChatCopsLoader = {
     init(next) {
       api.destroy();
-      config = next;
-      if (next.mode === 'inline') {
+      const current = { ...next, nonce: next.nonce ?? scriptNonce };
+      config = current;
+      if (current.mode === 'inline') {
         void mount();
         return;
       }
-      showLauncher(next);
-      if (next.autoOpen !== undefined && next.autoOpen !== false) {
-        timers.push(setTimeout(() => api.open(), next.autoOpen === true ? 0 : next.autoOpen));
+      showLauncher(current);
+      if (current.autoOpen !== undefined && current.autoOpen !== false) {
+        timers.push(setTimeout(() => api.open(), current.autoOpen === true ? 0 : current.autoOpen));
       }
-      if (next.welcomeBubble) {
+      if (current.welcomeBubble) {
         // The chat loads when the bubble is due, and shows it right away.
-        const bubble = next.welcomeBubble;
+        const bubble = current.welcomeBubble;
         timers.push(setTimeout(() => void mount({ welcomeBubble: { ...bubble, delay: 0 } }), bubble.delay ?? DEFAULT_BUBBLE_DELAY));
       }
     },

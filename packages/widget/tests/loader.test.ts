@@ -90,6 +90,50 @@ describe('the script tag loader', () => {
     loader.destroy();
   });
 
+  it('uses the script nonce for launcher and panel styles when manual init omits it', async () => {
+    const script = document.createElement('script');
+    script.nonce = 'script-nonce';
+    Object.defineProperty(document, 'currentScript', { value: script, configurable: true });
+    const { load } = panel();
+    const loader = createLoader(load);
+    Object.defineProperty(document, 'currentScript', { value: null, configurable: true });
+
+    loader.init({ apiUrl: 'https://api.test/chat' });
+
+    expect(shadow()?.querySelector('style')?.nonce).toBe('script-nonce');
+    loader.open();
+    await settle();
+    expect(shadow()?.querySelector('style')?.nonce).toBe('script-nonce');
+    loader.destroy();
+  });
+
+  it('prefers an explicit nonce over the script nonce', () => {
+    const script = document.createElement('script');
+    script.nonce = 'script-nonce';
+    Object.defineProperty(document, 'currentScript', { value: script, configurable: true });
+    const { load } = panel();
+    const loader = createLoader(load);
+    Object.defineProperty(document, 'currentScript', { value: null, configurable: true });
+
+    loader.init({ apiUrl: 'https://api.test/chat', nonce: 'config-nonce' });
+
+    expect(shadow()?.querySelector('style')?.nonce).toBe('config-nonce');
+    loader.destroy();
+  });
+
+  it('does not add a nonce when the script has none', () => {
+    const script = document.createElement('script');
+    Object.defineProperty(document, 'currentScript', { value: script, configurable: true });
+    const { load } = panel();
+    const loader = createLoader(load);
+    Object.defineProperty(document, 'currentScript', { value: null, configurable: true });
+
+    loader.init({ apiUrl: 'https://api.test/chat' });
+
+    expect(shadow()?.querySelector('style')?.hasAttribute('nonce')).toBe(false);
+    loader.destroy();
+  });
+
   it('starts loading the chat when the launcher is hovered or focused', () => {
     const { load } = panel();
     const loader = createLoader(load);

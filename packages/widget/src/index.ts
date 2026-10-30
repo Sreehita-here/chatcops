@@ -37,7 +37,7 @@ const ChatCops = {
     if (instance) {
       instance.destroy();
     }
-    instance = new Widget(config);
+    instance = new Widget({ ...config, nonce: config.nonce ?? scriptNonce });
     for (const [event, handlers] of persistentHandlers) {
       for (const handler of handlers) {
         instance.on(event, handler as WidgetEventHandler);
@@ -147,7 +147,8 @@ function autoInit(script: HTMLScriptElement | null): void {
 
 // Capture currentScript synchronously, then init on DOMContentLoaded
 const currentScript = typeof document !== 'undefined' ? (document.currentScript as HTMLScriptElement | null) : null;
-if (currentScript && currentScript.dataset.apiUrl) {
+const scriptNonce = currentScript?.nonce || undefined;
+if (currentScript?.dataset.apiUrl) {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => autoInit(currentScript), { once: true });
   } else {

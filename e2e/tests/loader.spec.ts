@@ -39,7 +39,6 @@ test('the script nonce allows launcher, panel and lazy pre-chat styles under CSP
   await page.evaluate(() => {
     (window as unknown as { ChatCops: { init(config: object): void } }).ChatCops.init({
       apiUrl: '/api/chat',
-      nonce: 'chatcops-e2e',
       preChatForm: { enabled: true, fields: [{ name: 'name', label: 'Name', type: 'text' }] },
     });
   });
