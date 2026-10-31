@@ -116,12 +116,14 @@ export interface WidgetConfig {
   waitForConsent?: boolean;
   /** Called by the notice's button, to open the site's own consent banner. Without it the button is left out. */
   onConsentRequest?: () => void;
+  /** A link in the header menu to your site's privacy policy (https: or http: only). */
+  privacyUrl?: string;
 }
 
 /** What `update()` can change on a running chat. */
 export type WidgetUpdate = Pick<
   WidgetConfig,
-  'branding' | 'welcomeMessage' | 'disclosure' | 'suggestions' | 'placeholder' | 'strings'
+  'branding' | 'welcomeMessage' | 'disclosure' | 'suggestions' | 'placeholder' | 'strings' | 'privacyUrl'
 > & { theme?: Omit<ThemeConfig, 'position'> };
 
 /** What each widget event passes to its handlers. */
@@ -197,6 +199,8 @@ export class Widget {
   private abortController?: AbortController;
   /** The visitor pressed Stop, so the abort that follows is not an error. */
   private stopped = false;
+  /** Messages sent while offline, for this page view only: never saved. Sent when the connection is back. */
+  private waiting: MessageData[] = [];
   private retryRequests = new Map<string, SendRequestOptions>();
   private eventHandlers = new Map<WidgetEventType, Set<AnyHandler>>();
   private containerEl?: HTMLElement;
@@ -251,6 +255,7 @@ export class Widget {
       this.shadow = createShadowRoot(undefined, { dir: this.config.dir, locale: this.config.locale, nonce: this.config.nonce });
     }
     this.mounted = true;
+    window.addEventListener('online', this.sendWaiting);
 
     if (this.config.theme) {
       applyTheme(this.shadow, this.config.theme);
@@ -286,6 +291,8 @@ export class Widget {
       onSend: (text) => this.handleSend(text),
       onStop: () => this.stopReply(),
       onClose: () => this.close(),
+      onNewConversation: () => this.newConversation(),
+      onDownloadTranscript: () => this.downloadTranscript(),
     });
 
     if (this.config.disclosure === false) {
@@ -467,6 +474,19 @@ export class Widget {
     this.reset(true);
   }
 
+  /** Saves the visible conversation as a text file. */
+  private downloadTranscript(): void {
+    const text = this.messages
+      .filter((m) => m.content?.trim())
+      .map((m) => `${m.role === 'user' ? 'Visitor' : 'Assistant'}: ${m.content}`)
+      .join('\n\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = 'transcript.txt';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 100);
+  }
+
   private reset(forget: boolean, show = true): void {
     // Waiting for consent: there is nothing to reset, and the notice stays up.
     if (!this.consented) return;
@@ -475,6 +495,7 @@ export class Widget {
     this.abortController = undefined;
     this.isStreaming = false;
     this.retryRequests.clear();
+    this.waiting = [];
     this.messages = [];
     this.conversationId = crypto.randomUUID();
     // Nothing old to restore into the new conversation.
@@ -566,7 +587,7 @@ export class Widget {
   }
 
   private panelLabels(): PanelLabels {
-    const { branding, placeholder } = this.config;
+    const { branding, placeholder, privacyUrl } = this.config;
     const l = this.locale;
     return {
       branding: {
@@ -579,6 +600,11 @@ export class Widget {
       closeLabel: l.closeButton,
       sendLabel: l.sendButton,
       stopLabel: l.stopButton,
+      moreLabel: l.moreButton,
+      newConversationLabel: l.newConversation,
+      downloadTranscriptLabel: l.downloadTranscript,
+      privacyLabel: l.privacy,
+      privacyUrl,
     };
   }
 
@@ -611,6 +637,7 @@ export class Widget {
     if (this.autoOpenTimer !== undefined) clearTimeout(this.autoOpenTimer);
     this.abortController?.abort();
     this.abortController = undefined;
+    window.removeEventListener('online', this.sendWaiting);
     this.restoreScroll();
     this.preChatFormEl?.destroy();
     this.bubble?.destroy();
@@ -754,13 +781,31 @@ export class Widget {
       role: 'user',
       content: text,
     };
-    this.messages.push(userMsg);
     this.panel.addMessage(userMsg);
+    if (!navigator.onLine) {
+      this.waiting.push(userMsg);
+      this.panel.messages.setWaiting(userMsg.id, this.locale.messageWaiting);
+      return;
+    }
+    await this.deliver(userMsg);
+  }
+
+  private async deliver(userMsg: MessageData): Promise<void> {
+    this.messages.push(userMsg);
     this.config.onMessage?.(userMsg);
     this.emit('message', userMsg);
-
-    await this.sendToServer(text, { userMessageId: userMsg.id });
+    await this.sendToServer(userMsg.content, { userMessageId: userMsg.id });
   }
+
+  /** The connection is back: sends what waited, in order, one at a time. */
+  private sendWaiting = async (): Promise<void> => {
+    if (this.isStreaming) return;
+    while (this.waiting.length && navigator.onLine && !this.destroyed) {
+      const next = this.waiting.shift() as MessageData;
+      this.panel.messages.setWaiting(next.id);
+      await this.deliver(next);
+    }
+  };
 
   /** Ends the reply that's streaming. What has streamed stays, as a finished reply. */
   private stopReply(): void {

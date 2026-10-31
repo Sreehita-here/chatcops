@@ -29,6 +29,7 @@ export interface WidgetLocaleStrings {
   preChatRequired: string;
   preChatInvalidEmail: string;
   retryButton: string;
+  messageWaiting: string;
   regenerateButton: string;
   suggestionsLabel: string;
   unreadCount: string;
@@ -37,6 +38,9 @@ export interface WidgetLocaleStrings {
   disclosureLearnMore: string;
   consentNotice: string;
   consentButton: string;
+  moreButton: string;
+  downloadTranscript: string;
+  privacy: string;
 }
 
 const en: WidgetLocaleStrings = {
@@ -68,6 +72,7 @@ const en: WidgetLocaleStrings = {
   preChatSubmit: 'Start Chat',
   preChatRequired: 'This field is required',
   preChatInvalidEmail: 'Please enter a valid email',
+  messageWaiting: "Will send when you're back online",
   retryButton: 'Retry',
   regenerateButton: 'Regenerate',
   suggestionsLabel: 'Suggested questions',
@@ -77,6 +82,9 @@ const en: WidgetLocaleStrings = {
   disclosureLearnMore: 'Learn more',
   consentNotice: 'Chat is available once you accept functional cookies.',
   consentButton: 'Cookie settings',
+  moreButton: 'More options',
+  downloadTranscript: 'Download transcript',
+  privacy: 'Privacy',
 };
 
 const locales: Record<string, WidgetLocaleStrings> = { en };

@@ -156,6 +156,7 @@ export interface WidgetConfig {
     onPreChatSubmit?: (data: Record<string, string>) => void;
     waitForConsent?: boolean;
     onConsentRequest?: () => void;
+    privacyUrl?: string;
 }
 
 export type WidgetEventHandler<E extends WidgetEventType = WidgetEventType> = (...args: WidgetEvents[E]) => void;
@@ -211,6 +212,7 @@ export interface WidgetLocaleStrings {
     preChatRequired: string;
     preChatInvalidEmail: string;
     retryButton: string;
+    messageWaiting: string;
     regenerateButton: string;
     suggestionsLabel: string;
     unreadCount: string;
@@ -219,13 +221,16 @@ export interface WidgetLocaleStrings {
     disclosureLearnMore: string;
     consentNotice: string;
     consentButton: string;
+    moreButton: string;
+    downloadTranscript: string;
+    privacy: string;
 }
 
 export type WidgetTokenName = (typeof TOKEN_NAMES)[number];
 
 export type WidgetTokens = Partial<Record<WidgetTokenName, string>>;
 
-export type WidgetUpdate = Pick<WidgetConfig, 'branding' | 'welcomeMessage' | 'disclosure' | 'suggestions' | 'placeholder' | 'strings'> & {
+export type WidgetUpdate = Pick<WidgetConfig, 'branding' | 'welcomeMessage' | 'disclosure' | 'suggestions' | 'placeholder' | 'strings' | 'privacyUrl'> & {
     theme?: Omit<ThemeConfig, 'position'>;
 };
 ```
